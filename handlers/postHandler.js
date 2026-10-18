@@ -17,6 +17,7 @@ const {
 } = require("./posts/postQuery");
 const { reactToPost, getReactionStats, getPostReviews } = require("./posts/postReaction");
 const { getPresignedUrl } = require("./posts/postPresigned");
+const { savePost, unsavePost } = require("./posts/postSave");
 
 module.exports = {
     createPost,
@@ -34,5 +35,7 @@ module.exports = {
     reactToPost,
     getReactionStats,
     getPostReviews,
-    getPresignedUrl
+    getPresignedUrl,
+    savePost,
+    unsavePost
 };
