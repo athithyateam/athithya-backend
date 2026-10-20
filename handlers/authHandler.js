@@ -35,7 +35,8 @@ exports.initiateSignup = async (req, res) => {
  */
 exports.completeSignup = async (req, res) => {
     try {
-        const result = await authService.completeSignup(req.body, req);
+        const io = req.app.get("io");
+        const result = await authService.completeSignup(req.body, { io });
         res.cookie("auth_token", result.token, getAuthCookieOptions());
         return res.status(201).json({
             success: true,
@@ -78,7 +79,8 @@ exports.signin = async (req, res) => {
  */
 exports.googleSignin = async (req, res) => {
     try {
-        const result = await authService.googleSignin(req.body, req);
+        const io = req.app.get("io");
+        const result = await authService.googleSignin(req.body, { io });
         res.cookie("auth_token", result.token, getAuthCookieOptions());
         return res.status(200).json({
             success: true,

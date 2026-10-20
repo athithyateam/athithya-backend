@@ -2,8 +2,59 @@ const bcrypt = require("bcryptjs");
 const axios = require("axios");
 const { User, OTP } = require("../db/mongoose");
 const { jwt, jwtkey } = require("../utils/jwt");
-const { generateOTP, sendOTPEmail, sendHtmlEmail } = require("../utils/emailService");
+const { generateOTP, sendOTPEmail, sendTemplateEmail } = require("./emailService");
 const { triggerNewUserWelcome } = require("../utils/onboardingHelper");
+
+/**
+ * Helper: Generate 30-day JWT token for authenticated user
+ */
+const generateAuthToken = (user) => {
+    return jwt.sign(
+        { userId: user._id.toString(), role: user.role },
+        jwtkey,
+        { expiresIn: "30d" }
+    );
+};
+
+/**
+ * Helper: Format user payload for consistent auth responses
+ */
+const formatAuthUser = (user) => {
+    return {
+        id: user._id.toString(),
+        _id: user._id.toString(),
+        firstname: user.firstname,
+        lastname: user.lastname,
+        email: user.email,
+        role: user.role,
+        isVerified: user.isVerified || false,
+        avatar: user.avatar || null
+    };
+};
+
+/**
+ * Helper: Notify platform admin via email of a new user registration
+ */
+const notifyAdminNewUserSignup = (user, source = "") => {
+    const adminEmail = process.env.ADMIN_EMAIL || "teamsathithya@gmail.com";
+    const username = `${user.firstname} ${user.lastname}`;
+    const sourceSuffix = source ? ` (${source})` : "";
+
+    sendTemplateEmail({
+        to: adminEmail,
+        subject: "New User Signup - Athithya",
+        templateName: "admin-new-user-signup",
+        data: {
+            username,
+            email: user.email,
+            role: user.role,
+            sourceSuffix,
+            registeredAt: new Date().toLocaleString()
+        }
+    }).catch((err) =>
+        console.error("Failed to send admin signup notification email:", err)
+    );
+};
 
 /**
  * Service: Initiate signup by validating and emailing OTP
@@ -38,7 +89,7 @@ const initiateSignup = async ({ email, role }) => {
 /**
  * Service: Complete signup by verifying OTP and creating user
  */
-const completeSignup = async ({ firstname, lastname, email, password, role, otp }, req = null) => {
+const completeSignup = async ({ firstname, lastname, email, password, role, otp }, { io } = {}) => {
     if (!otp) {
         const error = new Error("OTP is required");
         error.statusCode = 400;
@@ -77,63 +128,18 @@ const completeSignup = async ({ firstname, lastname, email, password, role, otp 
         isVerified: true
     });
 
-    if (req) {
-        triggerNewUserWelcome(req, user).catch((err) =>
+    if (io) {
+        triggerNewUserWelcome({ io }, user).catch((err) =>
             console.error("Onboarding welcome error:", err)
         );
     }
 
-    // Notify Admin via email
-    const adminEmail = "teamsathithya@gmail.com";
-    const username = `${user.firstname} ${user.lastname}`;
-    const adminSubject = "New User Signup - Athithya";
-    const adminHtml = `
-        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px;">
-            <div style="background-color: #1a1a1a; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
-                <h1 style="color: #C59A2F; margin: 0; font-size: 28px; letter-spacing: 2px;">ATHITHYA ADMIN</h1>
-            </div>
-            <div style="padding: 20px;">
-                <h2 style="color: #333; margin-top: 0;">New User Signup</h2>
-                <p style="color: #555; font-size: 16px; line-height: 1.6;">
-                    <strong>${username}</strong> has signed up or created a new account as a <strong>${user.role}</strong> in Athithya.
-                </p>
-                <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-                    <tr style="background-color: #f9f9f9;">
-                        <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Name:</td>
-                        <td style="padding: 10px; border: 1px solid #ddd;">${username}</td>
-                    </tr>
-                    <tr>
-                        <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Email:</td>
-                        <td style="padding: 10px; border: 1px solid #ddd;">${user.email}</td>
-                    </tr>
-                    <tr style="background-color: #f9f9f9;">
-                        <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Role:</td>
-                        <td style="padding: 10px; border: 1px solid #ddd; text-transform: uppercase;">${user.role}</td>
-                    </tr>
-                    <tr>
-                        <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Registered At:</td>
-                        <td style="padding: 10px; border: 1px solid #ddd;">${new Date().toLocaleString()}</td>
-                    </tr>
-                </table>
-            </div>
-        </div>
-    `;
-    sendHtmlEmail(adminEmail, adminSubject, adminHtml).catch((err) =>
-        console.error("Failed to send admin signup notification email:", err)
-    );
+    notifyAdminNewUserSignup(user);
 
-    const token = jwt.sign({ userId: user._id.toString(), role: user.role }, jwtkey, { expiresIn: "30d" });
+    const token = generateAuthToken(user);
 
     return {
-        user: {
-            id: user._id.toString(),
-            _id: user._id.toString(),
-            firstname: user.firstname,
-            lastname: user.lastname,
-            email: user.email,
-            role: user.role,
-            avatar: user.avatar || null
-        },
+        user: formatAuthUser(user),
         token,
         isVerified: true
     };
@@ -156,19 +162,10 @@ const signin = async ({ email, password } = {}) => {
         throw error;
     }
 
-    const token = jwt.sign({ userId: user._id.toString(), role: user.role }, jwtkey, { expiresIn: "30d" });
+    const token = generateAuthToken(user);
 
     return {
-        user: {
-            id: user._id.toString(),
-            _id: user._id.toString(),
-            firstname: user.firstname,
-            lastname: user.lastname,
-            email: user.email,
-            role: user.role,
-            isVerified: user.isVerified || false,
-            avatar: user.avatar || null
-        },
+        user: formatAuthUser(user),
         token
     };
 };
@@ -176,7 +173,7 @@ const signin = async ({ email, password } = {}) => {
 /**
  * Service: Google OAuth Signin/Signup
  */
-const googleSignin = async ({ token, role }, req = null) => {
+const googleSignin = async ({ token, role }, { io } = {}) => {
     if (role && !["guest", "host"].includes(role)) {
         const error = new Error("Invalid role. Only 'guest' or 'host' accounts can be registered.");
         error.statusCode = 400;
@@ -210,63 +207,19 @@ const googleSignin = async ({ token, role }, req = null) => {
     }
 
     if (isNewUser) {
-        if (req) {
-            triggerNewUserWelcome(req, user).catch((err) =>
+        if (io) {
+            triggerNewUserWelcome({ io }, user).catch((err) =>
                 console.error("Onboarding welcome error:", err)
             );
         }
 
-        const adminEmail = "teamsathithya@gmail.com";
-        const username = `${user.firstname} ${user.lastname}`;
-        const adminSubject = "New User Signup - Athithya";
-        const adminHtml = `
-            <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px;">
-                <div style="background-color: #1a1a1a; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
-                    <h1 style="color: #C59A2F; margin: 0; font-size: 28px; letter-spacing: 2px;">ATHITHYA ADMIN</h1>
-                </div>
-                <div style="padding: 20px;">
-                    <h2 style="color: #333; margin-top: 0;">New User Signup (via Google)</h2>
-                    <p style="color: #555; font-size: 16px; line-height: 1.6;">
-                        <strong>${username}</strong> has signed up or created a new account as a <strong>${user.role}</strong> in Athithya.
-                    </p>
-                    <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-                        <tr style="background-color: #f9f9f9;">
-                            <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Name:</td>
-                            <td style="padding: 10px; border: 1px solid #ddd;">${username}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Email:</td>
-                            <td style="padding: 10px; border: 1px solid #ddd;">${user.email}</td>
-                        </tr>
-                        <tr style="background-color: #f9f9f9;">
-                            <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Role:</td>
-                            <td style="padding: 10px; border: 1px solid #ddd; text-transform: uppercase;">${user.role}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Registered At:</td>
-                            <td style="padding: 10px; border: 1px solid #ddd;">${new Date().toLocaleString()}</td>
-                        </tr>
-                    </table>
-                </div>
-            </div>
-        `;
-        sendHtmlEmail(adminEmail, adminSubject, adminHtml).catch((err) =>
-            console.error("Failed to send admin signup notification email:", err)
-        );
+        notifyAdminNewUserSignup(user, "via Google");
     }
 
-    const jwtToken = jwt.sign({ userId: user._id.toString(), role: user.role }, jwtkey, { expiresIn: "30d" });
+    const jwtToken = generateAuthToken(user);
 
     return {
-        user: {
-            id: user._id.toString(),
-            _id: user._id.toString(),
-            firstname: user.firstname,
-            lastname: user.lastname,
-            email: user.email,
-            role: user.role,
-            avatar: user.avatar || null
-        },
+        user: formatAuthUser(user),
         token: jwtToken
     };
 };
@@ -355,5 +308,7 @@ module.exports = {
     googleSignin,
     forgotPassword,
     resetPassword,
-    getCurrentUser
+    getCurrentUser,
+    generateAuthToken,
+    formatAuthUser
 };

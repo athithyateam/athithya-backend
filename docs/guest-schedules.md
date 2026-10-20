@@ -1,0 +1,94 @@
+# Guest Schedules API
+
+Base prefix: `/api/guest-schedules`
+
+Allows guests to save and schedule specific dates/times for experiences they plan to take. Background workers run hourly reminders for these schedules.
+
+---
+
+## Endpoints
+
+### 1. Create or Update Guest Schedule
+* **Method**: `POST`
+* **Path**: `/api/guest-schedules`
+* **Auth**: Required (`checkAuth`)
+* **Note**: Hosts cannot schedule experiences; only guests can. Date and time must be in the future.
+* **Request Body** (`application/json`):
+  ```json
+  {
+    "postId": "64f1a2b...",
+    "scheduledDate": "2026-11-15", // Format: YYYY-MM-DD
+    "scheduledTime": "14:30" // Format: HH:mm (24-hour)
+  }
+  ```
+* **Success Response (200)**:
+  ```json
+  {
+    "success": true,
+    "message": "Experience scheduled successfully!",
+    "schedule": {
+      "_id": "653b...",
+      "user": "60d0fe...",
+      "post": {
+        "_id": "64f1a2b...",
+        "title": "Sunset Kayaking",
+        "photos": [ ... ],
+        "price": { ... }
+      },
+      "scheduledDate": "2026-11-15",
+      "scheduledTime": "14:30",
+      "scheduledDateTime": "2026-11-15T09:00:00.000Z",
+      "status": "scheduled"
+    }
+  }
+  ```
+
+---
+
+### 2. Get My Active Scheduled Experiences
+* **Method**: `GET`
+* **Path**: `/api/guest-schedules/me`
+* **Auth**: Required (`checkAuth`)
+* **Success Response (200)**:
+  ```json
+  {
+    "success": true,
+    "schedules": [
+      {
+        "_id": "653b...",
+        "post": { ... },
+        "scheduledDateTime": "2026-11-15T09:00:00.000Z",
+        "status": "scheduled"
+      }
+    ]
+  }
+  ```
+
+---
+
+### 3. Check Schedule Status for Post
+* **Method**: `GET`
+* **Path**: `/api/guest-schedules/check/:postId`
+* **Auth**: Required (`checkAuth`)
+* **Success Response (200)**:
+  ```json
+  {
+    "success": true,
+    "isScheduled": true,
+    "schedule": { ... }
+  }
+  ```
+
+---
+
+### 4. Delete / Unschedule Experience
+* **Method**: `DELETE`
+* **Path**: `/api/guest-schedules/:id`
+* **Auth**: Required (`checkAuth`)
+* **Success Response (200)**:
+  ```json
+  {
+    "success": true,
+    "message": "Experience unscheduled successfully"
+  }
+  ```
