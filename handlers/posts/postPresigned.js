@@ -1,15 +1,15 @@
-const { generatePresignedUploadUrl } = require('../../services/storageService');
+const { storageService } = require('../../services/storageService');
 
 exports.getPresignedUrl = async (req, res) => {
     try {
         const { filename, fileType, fileSize, type } = req.query;
 
-        const result = await generatePresignedUploadUrl({
+        const result = await storageService.generatePresignedUploadUrl(
             filename,
             fileType,
             fileSize,
             type
-        });
+        );
 
         return res.status(200).json({
             success: true,

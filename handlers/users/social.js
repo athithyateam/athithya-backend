@@ -1,4 +1,4 @@
-const socialService = require("../../services/users/socialService");
+const { socialService } = require("../../services/users/socialService");
 
 /**
  * Send a friend request
@@ -9,11 +9,11 @@ exports.sendFriendRequest = async (req, res) => {
         const currentUserId = req.user.userId;
         const io = req.app.get("io");
 
-        await socialService.sendFriendRequest({
+        await socialService.sendFriendRequest(
             targetUserId,
             currentUserId,
             io
-        });
+        );
 
         return res.status(200).json({ success: true, message: "Friend request sent" });
     } catch (error) {
@@ -34,11 +34,11 @@ exports.acceptFriendRequest = async (req, res) => {
         const currentUserId = req.user.userId;
         const io = req.app.get("io");
 
-        await socialService.acceptFriendRequest({
+        await socialService.acceptFriendRequest(
             requesterId,
             currentUserId,
             io
-        });
+        );
 
         return res.status(200).json({ success: true, message: "Friend request accepted" });
     } catch (error) {
@@ -59,11 +59,11 @@ exports.rejectFriendRequest = async (req, res) => {
         const currentUserId = req.user.userId;
         const io = req.app.get("io");
 
-        await socialService.rejectFriendRequest({
+        await socialService.rejectFriendRequest(
             requesterId,
             currentUserId,
             io
-        });
+        );
 
         return res.status(200).json({ success: true, message: "Friend request rejected" });
     } catch (error) {
@@ -84,11 +84,11 @@ exports.unfriend = async (req, res) => {
         const currentUserId = req.user.userId;
         const io = req.app.get("io");
 
-        await socialService.unfriend({
+        await socialService.unfriend(
             targetUserId,
             currentUserId,
             io
-        });
+        );
 
         return res.status(200).json({ success: true, message: "Unfriended and chat cleared" });
     } catch (error) {
@@ -108,11 +108,11 @@ exports.getFriends = async (req, res) => {
         const { id } = req.params;
         const { page = 1, limit = 20 } = req.query;
 
-        const result = await socialService.getFriends({
-            userId: id,
+        const result = await socialService.getFriends(
+            id,
             page,
             limit
-        });
+        );
 
         return res.status(200).json({
             success: true,
@@ -136,13 +136,13 @@ exports.getGuests = async (req, res) => {
         const currentUserId = req.user?.userId;
         const { search = "", page = 1, limit = 10, role } = req.query;
 
-        const result = await socialService.getGuests({
+        const result = await socialService.getGuests(
             currentUserId,
             search,
             page,
             limit,
             role
-        });
+        );
 
         return res.status(200).json({
             success: true,

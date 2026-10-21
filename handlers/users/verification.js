@@ -1,5 +1,5 @@
 const { parseIfJson } = require("../../utils/postUtils");
-const verificationService = require("../../services/users/verificationService");
+const { verificationService } = require("../../services/users/verificationService");
 
 /**
  * Send phone OTP verification via Brevo SMS API
@@ -7,10 +7,10 @@ const verificationService = require("../../services/users/verificationService");
 exports.sendPhoneOTP = async (req, res) => {
     try {
         const { phone } = req.body;
-        const result = await verificationService.sendPhoneOTP({
+        const result = await verificationService.sendPhoneOTP(
             phone,
-            userId: req.user?.userId
-        });
+            req.user?.userId
+        );
 
         return res.status(200).json({
             success: true,
@@ -34,11 +34,11 @@ exports.verifyPhoneOTP = async (req, res) => {
         const { phone, otp } = req.body;
         const userId = req.user.userId;
 
-        await verificationService.verifyPhoneOTP({
+        await verificationService.verifyPhoneOTP(
             phone,
             otp,
             userId
-        });
+        );
 
         return res.status(200).json({
             success: true,
@@ -73,9 +73,9 @@ exports.submitHostVerification = async (req, res) => {
 
         const io = req.app.get("io");
 
-        const result = await verificationService.submitHostVerification({
+        const result = await verificationService.submitHostVerification(
             userId,
-            verificationData: {
+            {
                 phone,
                 physicalAddress,
                 pincode,
@@ -86,7 +86,7 @@ exports.submitHostVerification = async (req, res) => {
                 aadhaarCardData
             },
             io
-        });
+        );
 
         return res.status(200).json({
             success: true,

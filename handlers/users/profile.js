@@ -1,6 +1,6 @@
 const { User, Post, Review, Booking, Notification, CommunityPost, Conversation, Message } = require("../../db/mongoose");
 const { deleteFromS3 } = require("../../utils/s3");
-const profileService = require("../../services/users/profileService");
+const { profileService } = require("../../services/users/profileService");
 
 /**
  * Update user profile (guest or host)
@@ -8,11 +8,11 @@ const profileService = require("../../services/users/profileService");
 exports.updateProfile = async (req, res) => {
     try {
         const io = req.app.get("io");
-        const result = await profileService.updateProfile({
-            userId: req.user.userId,
-            profileData: req.body,
+        const result = await profileService.updateProfile(
+            req.user.userId,
+            req.body,
             io
-        });
+        );
 
         return res.status(200).json({
             success: true,
@@ -87,13 +87,13 @@ exports.getProfile = async (req, res) => {
         const page = req.query.page;
         const limit = req.query.limit;
 
-        const result = await profileService.getProfile({
+        const result = await profileService.getProfile(
             userId,
             page,
             limit,
-            currentUserId: req.user?.userId,
-            currentUserRole: req.user?.role
-        });
+            req.user?.userId,
+            req.user?.role
+        );
 
         return res.status(200).json({
             success: true,
@@ -115,11 +115,11 @@ exports.getProfile = async (req, res) => {
 exports.getCompleteProfile = async (req, res) => {
     try {
         const userId = req.params.userId || req.user?.userId;
-        const result = await profileService.getCompleteProfile({
+        const result = await profileService.getCompleteProfile(
             userId,
-            currentUserId: req.user?.userId,
-            currentUserRole: req.user?.role
-        });
+            req.user?.userId,
+            req.user?.role
+        );
 
         return res.status(200).json({
             success: true,
@@ -143,12 +143,12 @@ exports.getTopRatedHosts = async (req, res) => {
         res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
         const { limit = 100, page = 1, minRating = 0, location } = req.query;
 
-        const result = await profileService.getTopRatedHosts({
+        const result = await profileService.getTopRatedHosts(
             limit,
             page,
             minRating,
             location
-        });
+        );
 
         return res.status(200).json({
             success: true,
@@ -172,11 +172,11 @@ exports.getTopRatedHosts = async (req, res) => {
  */
 exports.getUserById = async (req, res) => {
     try {
-        const result = await profileService.getUserById({
-            targetUserId: req.params.id,
-            currentUserId: req.user?.userId,
-            currentUserRole: req.user?.role
-        });
+        const result = await profileService.getUserById(
+            req.params.id,
+            req.user?.userId,
+            req.user?.role
+        );
 
         return res.status(200).json({
             success: true,

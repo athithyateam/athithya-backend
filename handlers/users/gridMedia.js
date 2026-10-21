@@ -146,19 +146,17 @@ exports.addPersonalMedia = async (req, res) => {
         // Asynchronously sync new personal media / moments to Google Drive
         setImmediate(async () => {
             try {
-                const { syncMediaFromUrl } = require("../../services/googleDriveService");
+                const { googleDriveService } = require("../../services/googleDriveService");
                 for (const doc of inserted) {
-                    if (doc.url && !doc.googleDriveFileId) {
-                        const ext = doc.url.split('.').pop().split('?')[0] || (doc.mediaType === 'video' ? 'mp4' : 'jpg');
-                        const res = await syncMediaFromUrl({
-                            url: doc.url,
-                            fileName: `MOMENTO_${doc.user}_${doc._id}.${ext}`,
-                            mimeType: doc.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
-                            category: 'momentos'
-                        });
-                        if (res?.fileId) {
-                            await HostPersonalMedia.findByIdAndUpdate(doc._id, { googleDriveFileId: res.fileId });
-                        }
+                    const defaultMime = doc.mediaType === "video" ? "video/mp4" : "image/jpeg";
+                    const updated = await googleDriveService.syncMediaItems(
+                        [doc],
+                        `MOMENTO_${doc.user}_${doc._id}`,
+                        "momentos",
+                        defaultMime
+                    );
+                    if (updated && doc.googleDriveFileId) {
+                        await HostPersonalMedia.findByIdAndUpdate(doc._id, { googleDriveFileId: doc.googleDriveFileId });
                     }
                 }
             } catch (driveErr) {

@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "allowJs": true,
+    "checkJs": false,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": false,
+    "outDir": "./dist"
+  },
+  "include": [
+    "server.js",
+    "services/**/*",
+    "handlers/**/*",
+    "routes/**/*",
+    "models/**/*",
+    "clients/**/*",
+    "utils/**/*",
+    "middleware/**/*",
+    "db/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

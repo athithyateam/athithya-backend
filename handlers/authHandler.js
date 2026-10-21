@@ -1,4 +1,4 @@
-const authService = require("../services/authService");
+const { authService } = require("../services/authService");
 
 // Helper for standard HTTP-only auth cookie configuration
 const getAuthCookieOptions = () => {
@@ -16,7 +16,8 @@ const getAuthCookieOptions = () => {
  */
 exports.initiateSignup = async (req, res) => {
     try {
-        const result = await authService.initiateSignup(req.body);
+        const { email, role } = req.body;
+        const result = await authService.initiateSignup(email, role);
         return res.status(200).json({
             success: true,
             message: "OTP sent to your email",
@@ -35,8 +36,9 @@ exports.initiateSignup = async (req, res) => {
  */
 exports.completeSignup = async (req, res) => {
     try {
+        const { firstname, lastname, email, password, role, otp } = req.body;
         const io = req.app.get("io");
-        const result = await authService.completeSignup(req.body, { io });
+        const result = await authService.completeSignup(firstname, lastname, email, password, role, otp, io);
         res.cookie("auth_token", result.token, getAuthCookieOptions());
         return res.status(201).json({
             success: true,
@@ -58,7 +60,8 @@ exports.completeSignup = async (req, res) => {
  */
 exports.signin = async (req, res) => {
     try {
-        const result = await authService.signin(req.body);
+        const { email, password } = req.body;
+        const result = await authService.signin(email, password);
         res.cookie("auth_token", result.token, getAuthCookieOptions());
         return res.status(200).json({
             success: true,
@@ -79,8 +82,9 @@ exports.signin = async (req, res) => {
  */
 exports.googleSignin = async (req, res) => {
     try {
+        const { token, role } = req.body;
         const io = req.app.get("io");
-        const result = await authService.googleSignin(req.body, { io });
+        const result = await authService.googleSignin(token, role, io);
         res.cookie("auth_token", result.token, getAuthCookieOptions());
         return res.status(200).json({
             success: true,
@@ -101,7 +105,8 @@ exports.googleSignin = async (req, res) => {
  */
 exports.forgotPassword = async (req, res) => {
     try {
-        await authService.forgotPassword(req.body);
+        const { email } = req.body;
+        await authService.forgotPassword(email);
         return res.status(200).json({
             success: true,
             message: "OTP sent to your email"
@@ -119,7 +124,8 @@ exports.forgotPassword = async (req, res) => {
  */
 exports.resetPassword = async (req, res) => {
     try {
-        await authService.resetPassword(req.body);
+        const { email, otp, newPassword } = req.body;
+        await authService.resetPassword(email, otp, newPassword);
         return res.status(200).json({
             success: true,
             message: "Password reset successfully"
