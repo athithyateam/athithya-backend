@@ -1,6 +1,6 @@
 const { Post, User, Notification } = require("../../db/mongoose");
 const { parseIfJson } = require("../../utils/postUtils");
-const { uploadToS3, deleteFromS3 } = require("../../utils/s3");
+const { upload, deleteFile } = require("../../services/storageService");
 const { notifyAdmins } = require("../../utils/notifyAdminHelper");
 
 exports.updatePost = async (req, res) => {
@@ -31,13 +31,13 @@ exports.updatePost = async (req, res) => {
             const currentPhotoIds = existingPhotos.map(p => p.public_id).filter(id => id);
             for (const photo of (post.photos || [])) {
                 if (photo.public_id && !currentPhotoIds.includes(photo.public_id)) {
-                    try { await deleteFromS3(photo.public_id); } catch (err) {}
+                    await deleteFile(photo.public_id);
                 }
             }
             const currentVideoIds = existingVideos.map(v => v.public_id).filter(id => id);
             for (const video of (post.videos || [])) {
                 if (video.public_id && !currentVideoIds.includes(video.public_id)) {
-                    try { await deleteFromS3(video.public_id); } catch (err) {}
+                    await deleteFile(video.public_id);
                 }
             }
         }
@@ -59,14 +59,14 @@ exports.updatePost = async (req, res) => {
         let newPhotos = [];
         if (req.files && req.files["photos"]) {
             for (const file of req.files["photos"]) {
-                const result = await uploadToS3(file, "posts");
+                const result = await upload(file, "posts");
                 newPhotos.push({ url: result.secure_url, public_id: result.public_id, resource_type: result.resource_type || 'image' });
             }
         }
         let newVideos = [];
         if (req.files && req.files["videos"]) {
             for (const file of req.files["videos"]) {
-                const result = await uploadToS3(file, "posts");
+                const result = await upload(file, "posts");
                 newVideos.push({ url: result.secure_url, public_id: result.public_id, resource_type: result.resource_type || 'video' });
             }
         }

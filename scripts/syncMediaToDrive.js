@@ -1,7 +1,8 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const { connectDB, Post, HostPersonalMedia, User } = require('../db/mongoose');
-const { getDriveClient, ensureFolderStructure, uploadMediaToDrive } = require('../utils/googleDriveHelper');
+const { getDriveClient } = require('../clients/googleDriveClient');
+const { ensureFolderStructure, uploadMediaToDrive } = require('../services/googleDriveService');
 
 async function syncAllMediaToDrive() {
     console.log("==================================================");

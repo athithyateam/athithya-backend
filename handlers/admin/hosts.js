@@ -1,6 +1,6 @@
 const { User, Notification, HostHistory } = require("../../db/mongoose");
 const { sendHtmlEmail } = require("../../utils/emailService");
-const { deleteFromS3 } = require("../../utils/s3");
+const { deleteFile } = require("../../services/storageService");
 
 const saveHostOldDetails = async (user, changedFields = []) => {
     try {
@@ -212,7 +212,7 @@ exports.updateHostVerificationStatus = async (req, res) => {
                     const approvedIds = approvedAadhaar.map(doc => doc.public_id).filter(id => id);
                     for (const doc of currentAadhaar) {
                         if (doc.public_id && !approvedIds.includes(doc.public_id)) {
-                            try { await deleteFromS3(doc.public_id); } catch (err) {}
+                            await deleteFile(doc.public_id);
                         }
                     }
                     user.hostDetails.aadhaarCard = approvedAadhaar;
@@ -232,7 +232,7 @@ exports.updateHostVerificationStatus = async (req, res) => {
                 const currentIds = currentAadhaar.map(doc => doc.public_id).filter(id => id);
                 for (const doc of pendingAadhaar) {
                     if (doc.public_id && !currentIds.includes(doc.public_id)) {
-                        try { await deleteFromS3(doc.public_id); } catch (err) {}
+                        await deleteFile(doc.public_id);
                     }
                 }
                 user.pendingHostDetails = undefined;

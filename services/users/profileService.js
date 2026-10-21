@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const { User, Post, Review, Notification, HostHistory } = require("../../db/mongoose");
-const { deleteFromS3 } = require("../../utils/s3");
+const { deleteFile } = require("../storageService");
 const { parseIfJson } = require("../../utils/postUtils");
 const { sendTemplateEmail } = require("../emailService");
 
@@ -697,12 +697,12 @@ const updateProfile = async ({ userId, profileData, io }) => {
 
     if (removeAvatar === "true" || removeAvatar === true) {
         if (user.avatar && user.avatar.public_id) {
-            try { await deleteFromS3(user.avatar.public_id); } catch (err) {}
+            try { await deleteFile(user.avatar.public_id); } catch (err) {}
         }
         user.avatar = undefined;
     } else if (avatarUrl) {
         if (user.avatar && user.avatar.public_id && user.avatar.public_id !== avatarPublicId) {
-            try { await deleteFromS3(user.avatar.public_id); } catch (err) {}
+            try { await deleteFile(user.avatar.public_id); } catch (err) {}
         }
         user.avatar = { url: avatarUrl, public_id: avatarPublicId };
     }

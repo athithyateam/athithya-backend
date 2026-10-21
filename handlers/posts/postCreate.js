@@ -1,6 +1,6 @@
 const { Post, User, Notification } = require("../../db/mongoose");
 const { parseIfJson } = require("../../utils/postUtils");
-const { uploadToS3 } = require("../../utils/s3");
+const { upload } = require("../../services/storageService");
 const { sendHtmlEmail } = require("../../utils/emailService");
 const { notifyAdmins } = require("../../utils/notifyAdminHelper");
 
@@ -59,7 +59,7 @@ exports.createPost = async (req, res) => {
         // Multer fallback for backward compatibility
         if (req.files) {
             if (req.files["photos"]) {
-                const photosPromises = req.files["photos"].map(file => uploadToS3(file, "posts"));
+                const photosPromises = req.files["photos"].map(file => upload(file, "posts"));
                 const photosResults = await Promise.all(photosPromises);
                 const uploadedPhotos = photosResults.map(result => ({
                     url: result.secure_url,
@@ -69,7 +69,7 @@ exports.createPost = async (req, res) => {
                 photoUrls = [...photoUrls, ...uploadedPhotos];
             }
             if (req.files["videos"]) {
-                const videosPromises = req.files["videos"].map(file => uploadToS3(file, "posts"));
+                const videosPromises = req.files["videos"].map(file => upload(file, "posts"));
                 const videosResults = await Promise.all(videosPromises);
                 const uploadedVideos = videosResults.map(result => ({
                     url: result.secure_url,
@@ -146,7 +146,7 @@ exports.createPost = async (req, res) => {
         // Asynchronously sync experience media to Google Drive in background
         setImmediate(async () => {
             try {
-                const { uploadMediaToDrive } = require("../../utils/googleDriveHelper");
+                const { syncMediaFromUrl } = require("../../services/googleDriveService");
                 let modified = false;
                 if (post.photos && Array.isArray(post.photos)) {
                     for (let i = 0; i < post.photos.length; i++) {
@@ -154,7 +154,7 @@ exports.createPost = async (req, res) => {
                         if (p.url && !p.googleDriveFileId) {
                             const ext = p.url.split('.').pop().split('?')[0] || "jpg";
                             const cleanTitle = (post.title || "experience").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 30);
-                            const res = await uploadMediaToDrive({
+                            const res = await syncMediaFromUrl({
                                 url: p.url,
                                 fileName: `EXP_${cleanTitle}_${post._id}_photo_${i + 1}.${ext}`,
                                 category: 'experiences'
@@ -172,7 +172,7 @@ exports.createPost = async (req, res) => {
                         if (v.url && !v.googleDriveFileId) {
                             const ext = v.url.split('.').pop().split('?')[0] || "mp4";
                             const cleanTitle = (post.title || "experience").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 30);
-                            const res = await uploadMediaToDrive({
+                            const res = await syncMediaFromUrl({
                                 url: v.url,
                                 fileName: `EXP_${cleanTitle}_${post._id}_video_${i + 1}.${ext}`,
                                 mimeType: 'video/mp4',

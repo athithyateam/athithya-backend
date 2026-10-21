@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const { User, Post, HostPersonalMedia } = require("../../db/mongoose");
-const { deleteFromS3 } = require("../../utils/s3");
+const { deleteFile } = require("../../services/storageService");
 
 exports.getHostGridMedia = async (req, res) => {
     try {
@@ -146,11 +146,11 @@ exports.addPersonalMedia = async (req, res) => {
         // Asynchronously sync new personal media / moments to Google Drive
         setImmediate(async () => {
             try {
-                const { uploadMediaToDrive } = require("../../utils/googleDriveHelper");
+                const { syncMediaFromUrl } = require("../../services/googleDriveService");
                 for (const doc of inserted) {
                     if (doc.url && !doc.googleDriveFileId) {
                         const ext = doc.url.split('.').pop().split('?')[0] || (doc.mediaType === 'video' ? 'mp4' : 'jpg');
-                        const res = await uploadMediaToDrive({
+                        const res = await syncMediaFromUrl({
                             url: doc.url,
                             fileName: `MOMENTO_${doc.user}_${doc._id}.${ext}`,
                             mimeType: doc.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
@@ -188,20 +188,12 @@ exports.deletePersonalMedia = async (req, res) => {
         }
 
         if (media.public_id) {
-            try {
-                await deleteFromS3(media.public_id);
-            } catch (err) {
-                console.error("Error deleting personal media from S3:", err);
-            }
+            await deleteFile(media.public_id);
         }
 
         if (media.googleDriveFileId) {
-            try {
-                const { deleteMediaFromDrive } = require("../../utils/googleDriveHelper");
-                await deleteMediaFromDrive(media.googleDriveFileId);
-            } catch (driveErr) {
-                console.error("Error deleting personal media from Google Drive:", driveErr);
-            }
+            const { deleteMedia } = require("../../services/googleDriveService");
+            await deleteMedia(media.googleDriveFileId);
         }
 
         await HostPersonalMedia.deleteOne({ _id: id });

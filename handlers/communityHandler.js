@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const { CommunityPost, User } = require("../db/mongoose");
-const { uploadToS3, deleteFromS3 } = require("../utils/s3");
+const { deleteFile } = require("../services/storageService");
 
 const createCommunityPost = async (req, res) => {
     console.log("[DEBUG] createCommunityPost request received", { userId: req.user?.userId, mediaCount: req.body.media?.length });
@@ -105,11 +105,7 @@ const deleteCommunityPost = async (req, res) => {
         // Delete from S3
         if (post.media && post.media.length > 0) {
             for (const item of post.media) {
-                try {
-                    await deleteFromS3(item.public_id);
-                } catch (cErr) {
-                    console.error("S3 destroy error:", cErr);
-                }
+                    await deleteFile(item.public_id);
             }
         }
 

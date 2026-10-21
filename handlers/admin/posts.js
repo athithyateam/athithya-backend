@@ -1,5 +1,5 @@
 const { Post, Booking, Notification, HostHistory } = require("../../db/mongoose");
-const { deleteFromS3 } = require("../../utils/s3");
+const { deleteFile } = require("../../services/storageService");
 const { sendHtmlEmail } = require("../../utils/emailService");
 
 exports.getAllExperiences = async (req, res) => {
@@ -197,9 +197,7 @@ exports.updateExperienceStatus = async (req, res) => {
                 const assets = [...(post.photos || []), ...(post.videos || [])];
                 for (const asset of assets) {
                     if (asset.public_id) {
-                        try {
-                            await deleteFromS3(asset.public_id);
-                        } catch (err) { console.error("S3 delete error:", err); }
+                        await deleteFile(asset.public_id);
                     }
                 }
                 await Booking.updateMany(
@@ -477,9 +475,7 @@ exports.deleteExperience = async (req, res) => {
         // Delete S3 assets (photos/videos)
         const assets = [...(post.photos || []), ...(post.videos || [])];
         for (const asset of assets) {
-            if (asset.public_id) {
-                try { await deleteFromS3(asset.public_id); } catch (err) { console.error("S3 delete error:", err); }
-            }
+                await deleteFile(asset.public_id);
         }
 
         // Cascade soft-delete active bookings

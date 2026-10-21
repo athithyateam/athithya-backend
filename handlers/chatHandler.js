@@ -1,5 +1,5 @@
 const { Conversation, Message, User } = require("../db/mongoose");
-const { uploadToS3 } = require("../utils/s3");
+const { upload } = require("../services/storageService");
 const { checkChatEligibility } = require("../utils/hostBookingChatHelper");
 const { notifyRecipientOfNewMessage } = require("../utils/messageEmailHelper");
 
@@ -216,7 +216,7 @@ const createGroup = async (req, res) => {
 
         let avatarData = undefined;
         if (req.file) {
-            const result = await uploadToS3(req.file, "groups");
+            const result = await upload(req.file, "groups");
             avatarData = { url: result.secure_url, public_id: result.public_id };
         }
 
@@ -281,7 +281,7 @@ const updateConversation = async (req, res) => {
         if (description) updates['groupMetadata.description'] = description;
 
         if (req.file) {
-            const result = await uploadToS3(req.file, "groups");
+            const result = await upload(req.file, "groups");
             updates['groupMetadata.avatar'] = { url: result.secure_url, public_id: result.public_id };
         }
 

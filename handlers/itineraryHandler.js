@@ -1,5 +1,5 @@
 const { Post, User, Itinerary } = require("../db/mongoose");
-const { deleteFromS3 } = require("../utils/s3");
+const { deleteFile } = require("../services/storageService");
 
 // helper to parse JSON fields sent as strings in form-data
 const parseIfJson = (value) => {
@@ -263,11 +263,7 @@ const updateItinerary = async (req, res) => {
         const currentPhotoIds = existingPhotos.map(p => p.public_id).filter(id => id);
         for (const photo of (itinerary.photos || [])) {
             if (photo.public_id && !currentPhotoIds.includes(photo.public_id)) {
-                try {
-                    await deleteFromS3(photo.public_id);
-                } catch (err) {
-                    console.error("S3 photo delete error during update:", err);
-                }
+                await deleteFile(photo.public_id);
             }
         }
 
@@ -275,11 +271,7 @@ const updateItinerary = async (req, res) => {
         const currentVideoIds = existingVideos.map(v => v.public_id).filter(id => id);
         for (const video of (itinerary.videos || [])) {
             if (video.public_id && !currentVideoIds.includes(video.public_id)) {
-                try {
-                    await deleteFromS3(video.public_id);
-                } catch (err) {
-                    console.error("S3 video delete error during update:", err);
-                }
+                await deleteFile(video.public_id);
             }
         }
 

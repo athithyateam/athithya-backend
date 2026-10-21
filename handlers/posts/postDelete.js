@@ -1,5 +1,6 @@
 const { Post, Booking, User, HostHistory } = require("../../db/mongoose");
-const { deleteFromS3 } = require("../../utils/s3");
+const { deleteFile } = require("../../services/storageService");
+const { deleteMedia } = require("../../services/googleDriveService");
 const { notifyAdmins } = require("../../utils/notifyAdminHelper");
 
 exports.deletePost = async (req, res) => {
@@ -83,17 +84,10 @@ exports.deletePost = async (req, res) => {
         const assets = [...(post.photos || []), ...(post.videos || [])];
         for (const asset of assets) {
             if (asset.public_id) {
-                try {
-                    await deleteFromS3(asset.public_id);
-                } catch (err) { console.error("S3 delete error:", err); }
+                await deleteFile(asset.public_id);
             }
             if (asset.googleDriveFileId) {
-                try {
-                    const { deleteMediaFromDrive } = require("../../utils/googleDriveHelper");
-                    await deleteMediaFromDrive(asset.googleDriveFileId);
-                } catch (driveErr) {
-                    console.error("Google Drive delete error:", driveErr);
-                }
+                await deleteMedia(asset.googleDriveFileId);
             }
         }
 
