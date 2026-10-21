@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const { Schedule, Booking, User, Notification } = require("../db/mongoose");
-const { sendHtmlEmail } = require("./emailService");
+const { sendHtmlEmail } = require("../services/emailService");
 
 const checkExpiredSchedules = async (io) => {
     try {
