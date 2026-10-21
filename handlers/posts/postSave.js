@@ -1,47 +1,43 @@
-const { Post, User } = require("../../db/mongoose");
+const { postService } = require("../../services/postService");
 
+/**
+ * Controller: Save / Bookmark a post
+ */
 const savePost = async (req, res) => {
     try {
-        const userId = req.user.userId;
-        const postId = req.params.id;
+        const result = await postService.savePost(
+            req.params.id,
+            req.user.userId,
+            req.user.role
+        );
 
-        if (req.user.role === 'host') {
-            return res.status(400).json({ success: false, message: "Hosts cannot engage with another host's experience. Only guests can." });
-        }
-
-        const post = await Post.findById(postId);
-        if (!post) return res.status(404).json({ success: false, message: "Post not found" });
-
-        const user = await User.findById(userId);
-        const alreadySaved = user?.savedPosts?.some(p => p.toString() === postId);
-        if (!alreadySaved) {
-            await User.findByIdAndUpdate(userId, { $addToSet: { savedPosts: postId } });
-            await Post.findByIdAndUpdate(postId, { $inc: { savesCount: 1 } });
-        }
-
-        return res.status(200).json({ success: true, message: "Post saved successfully" });
+        return res.status(200).json(result);
     } catch (err) {
         console.error("Save post error:", err);
-        return res.status(500).json({ success: false, message: "Error saving post" });
+        return res.status(err.statusCode || 500).json({
+            success: false,
+            message: err.message || "Error saving post"
+        });
     }
 };
 
+/**
+ * Controller: Unsave / Remove bookmark from a post
+ */
 const unsavePost = async (req, res) => {
     try {
-        const userId = req.user.userId;
-        const postId = req.params.id;
+        const result = await postService.unsavePost(
+            req.params.id,
+            req.user.userId
+        );
 
-        const user = await User.findById(userId);
-        const alreadySaved = user?.savedPosts?.some(p => p.toString() === postId);
-        if (alreadySaved) {
-            await User.findByIdAndUpdate(userId, { $pull: { savedPosts: postId } });
-            await Post.findByIdAndUpdate(postId, { $inc: { savesCount: -1 } });
-        }
-
-        return res.status(200).json({ success: true, message: "Post removed from saved list" });
+        return res.status(200).json(result);
     } catch (err) {
         console.error("Unsave post error:", err);
-        return res.status(500).json({ success: false, message: "Error unsaving post" });
+        return res.status(err.statusCode || 500).json({
+            success: false,
+            message: err.message || "Error unsaving post"
+        });
     }
 };
 

@@ -51,8 +51,67 @@ function toRadians(degrees) {
     return degrees * (Math.PI / 180);
 }
 
+const LISTING_CARD_PROJECTION = "title subtitle postType photos location price duration difficulty categories discounts isFeatured status rating bookingCount savesCount clicks user createdAt approvedAt";
+
+/**
+ * Expand special category names such as 'others' or 'other'
+ * @param {string|string[]} categories
+ * @returns {string[]}
+ */
+const expandCategories = (categories) => {
+    if (!categories) return [];
+    const list = Array.isArray(categories) ? categories : String(categories).split(',');
+    return list.flatMap(c => {
+        const trimmed = String(c).trim();
+        const lc = trimmed.toLowerCase();
+        if (lc === 'others' || lc === 'other') {
+            return ['Others', 'Other', 'Rock Climbing', 'Flyboarding', 'rock-climbing', 'flyboarding'];
+        }
+        return [trimmed];
+    });
+};
+
+/**
+ * Build mongo filter for categories query
+ * @param {string|string[]} categories
+ * @returns {object|undefined}
+ */
+const buildCategoryFilter = (categories) => {
+    if (!categories) return undefined;
+    const expCats = expandCategories(categories);
+    const list = Array.isArray(categories) ? categories : String(categories).split(',');
+    const isOtherFilter = list.some(c => ['other', 'others'].includes(String(c).trim().toLowerCase()));
+    if (isOtherFilter) {
+        return { $in: expCats, $nin: ['Safari', 'safari', 'SAFARI'] };
+    }
+    return { $in: expCats };
+};
+
+/**
+ * Attach calculated distance to a list of trek documents
+ * @param {any[]} treks
+ * @param {number} refLat
+ * @param {number} refLng
+ * @returns {any[]}
+ */
+const attachDistanceToTreks = (treks, refLat, refLng) => {
+    return (treks || []).map(trek => {
+        const trekObj = typeof trek.toObject === 'function' ? trek.toObject() : { ...trek };
+        if (trek.location?.coordinates?.coordinates) {
+            const [trekLng, trekLat] = trek.location.coordinates.coordinates;
+            trekObj.distance = Math.round(calculateDistance(refLat, refLng, trekLat, trekLng) * 10) / 10;
+            trekObj.distanceUnit = 'km';
+        }
+        return trekObj;
+    });
+};
+
 module.exports = {
     parseIfJson,
     calculateDistance,
-    toRadians
+    toRadians,
+    LISTING_CARD_PROJECTION,
+    expandCategories,
+    buildCategoryFilter,
+    attachDistanceToTreks
 };

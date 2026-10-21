@@ -1,10 +1,97 @@
-const { Post, User, Notification, HostHistory, Booking } = require("../../db/mongoose");
-const { parseIfJson } = require("../../utils/postUtils");
+const { Post, User, Notification, HostHistory, Booking, Review } = require("../../db/mongoose");
+const { 
+    parseIfJson, 
+    calculateDistance, 
+    buildCategoryFilter, 
+    attachDistanceToTreks, 
+    LISTING_CARD_PROJECTION 
+} = require("../../utils/postUtils");
 const { storageService: defaultStorageService } = require("../storageService");
 const { googleDriveService: defaultGoogleDriveService } = require("../googleDriveService");
 const { emailService: defaultEmailService } = require("../emailService");
 const { notifyAdmins: defaultNotifyAdmins } = require("../../utils/notifyAdminHelper");
+const { userService: defaultUserService } = require("../userService");
+import { PostReactionService, postReactionService as defaultPostReactionService } from "./postReactionService";
 import { parsePostPayload, calculatePricingAndFees, isValidS3MediaUrl } from "./postPayloadParser";
+
+export interface GetPostsOptions {
+    postType?: string;
+    userRole?: string;
+    city?: string;
+    country?: string;
+    state?: string;
+    minPrice?: number | string;
+    maxPrice?: number | string;
+    status?: string;
+    difficulty?: string;
+    categories?: string | string[];
+    isFeatured?: boolean | string;
+    page?: number | string;
+    limit?: number | string;
+    sort?: string;
+    postTypeFilter?: string | string[];
+}
+
+export interface PaginatedPostsResult {
+    count: number;
+    total: number;
+    page: number;
+    totalPages: number;
+    posts: any[];
+}
+
+export interface PostDetailResult {
+    post: any;
+    reviews: { count: number; data: any[] };
+    similarPosts: any[];
+}
+
+export interface GetTopRatedTreksOptions {
+    limit?: number | string;
+    page?: number | string;
+    minRating?: number | string;
+}
+
+export interface TopRatedTreksResult {
+    count: number;
+    total: number;
+    page: number;
+    totalPages: number;
+    treks: any[];
+}
+
+export interface GetNearbyTreksOptions {
+    latitude?: string | number;
+    longitude?: string | number;
+    limit?: number | string;
+    page?: number | string;
+    difficulty?: string;
+    minPrice?: number | string;
+    maxPrice?: number | string;
+    categories?: string | string[];
+}
+
+export interface NearbyTreksResult {
+    count: number;
+    total: number;
+    page: number;
+    totalPages: number;
+    treks: any[];
+}
+
+export interface GetPendingPostsOptions {
+    postType?: string;
+    page?: number | string;
+    limit?: number | string;
+}
+
+export interface CategoryActivityResult {
+    category: string;
+    normalizedCategory: string;
+    latestApprovedAt: Date | string;
+    count: number;
+    isNew: boolean;
+}
 
 export class PostActionService {
     private static instance: PostActionService | null = null;
@@ -15,10 +102,13 @@ export class PostActionService {
     private notificationModel: any;
     private hostHistoryModel: any;
     private bookingModel: any;
+    private reviewModel: any;
     private storageService: any;
     private googleDriveService: any;
     private emailService: any;
     private adminNotifier: (reqOrApp: any, payload: any) => Promise<any>;
+    private userService: any;
+    private reactionService: PostReactionService;
 
     constructor(
         instanceKey: symbol,
@@ -30,7 +120,10 @@ export class PostActionService {
         storageServiceInstance: any = defaultStorageService,
         googleDriveServiceInstance: any = defaultGoogleDriveService,
         emailServiceInstance: any = defaultEmailService,
-        adminNotifier: (reqOrApp: any, payload: any) => Promise<any> = defaultNotifyAdmins
+        adminNotifier: (reqOrApp: any, payload: any) => Promise<any> = defaultNotifyAdmins,
+        userServiceInstance: any = defaultUserService,
+        reactionServiceInstance: PostReactionService = defaultPostReactionService,
+        reviewModel: any = Review
     ) {
         if (instanceKey !== PostActionService.instanceKey) {
             throw new Error("Please use PostActionService.getInstance() to retrieve or create an instance");
@@ -44,6 +137,9 @@ export class PostActionService {
         this.googleDriveService = googleDriveServiceInstance;
         this.emailService = emailServiceInstance;
         this.adminNotifier = adminNotifier;
+        this.userService = userServiceInstance;
+        this.reactionService = reactionServiceInstance;
+        this.reviewModel = reviewModel;
     }
 
     public static getInstance(
@@ -55,7 +151,10 @@ export class PostActionService {
         storageServiceInstance?: any,
         googleDriveServiceInstance?: any,
         emailServiceInstance?: any,
-        adminNotifier?: (reqOrApp: any, payload: any) => Promise<any>
+        adminNotifier?: (reqOrApp: any, payload: any) => Promise<any>,
+        userServiceInstance?: any,
+        reactionServiceInstance?: PostReactionService,
+        reviewModel?: any
     ): PostActionService {
         if (!this.instance) {
             this.instance = new PostActionService(
@@ -68,7 +167,10 @@ export class PostActionService {
                 storageServiceInstance,
                 googleDriveServiceInstance,
                 emailServiceInstance,
-                adminNotifier
+                adminNotifier,
+                userServiceInstance,
+                reactionServiceInstance,
+                reviewModel
             );
         }
         return this.instance;
@@ -568,6 +670,454 @@ export class PostActionService {
             success: true,
             message: "Post deleted successfully"
         };
+    }
+
+    /**
+     * Service: Save / Bookmark a post
+     */
+    public async savePost(postId: string, userId: string, userRole: string): Promise<{ success: boolean; message: string }> {
+        if (userRole === 'host') {
+            const error: any = new Error("Hosts cannot engage with another host's experience. Only guests can.");
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const post = await this.postModel.findById(postId);
+        if (!post) {
+            const error: any = new Error("Post not found");
+            error.statusCode = 404;
+            throw error;
+        }
+
+        const added = await this.userService.addSavedPost(userId, postId);
+        if (added) {
+            await this.postModel.findByIdAndUpdate(postId, { $inc: { savesCount: 1 } });
+        }
+
+        return { success: true, message: "Post saved successfully" };
+    }
+
+    /**
+     * Service: Unsave / Remove bookmark from a post
+     */
+    public async unsavePost(postId: string, userId: string): Promise<{ success: boolean; message: string }> {
+        const removed = await this.userService.removeSavedPost(userId, postId);
+        if (removed) {
+            await this.postModel.findByIdAndUpdate(postId, { $inc: { savesCount: -1 } });
+        }
+
+        return { success: true, message: "Post removed from saved list" };
+    }
+
+    /**
+     * Service: Query posts with filters, pagination, and sorting
+     */
+    public async getPosts(options: GetPostsOptions = {}): Promise<PaginatedPostsResult> {
+        const {
+            postType, userRole, city, country, state, minPrice, maxPrice, status,
+            difficulty, categories, isFeatured, page = 1, limit = 20, sort = 'latest',
+            postTypeFilter
+        } = options;
+
+        const filter: any = {};
+        if (postType) {
+            if (postType.includes(',')) filter.postType = { $in: postType.split(',') };
+            else filter.postType = postType;
+        } else if (postTypeFilter) {
+            if (Array.isArray(postTypeFilter)) filter.postType = { $in: postTypeFilter };
+            else filter.postType = postTypeFilter;
+        }
+
+        if (userRole) filter.userRole = userRole;
+        if (city) filter['location.city'] = new RegExp(city, 'i');
+        if (state) filter['location.state'] = new RegExp(state, 'i');
+        if (country) filter['location.country'] = new RegExp(country, 'i');
+        filter.status = status || 'active';
+        filter.isHidden = { $ne: true };
+
+        if (difficulty) filter.difficulty = difficulty;
+        if (categories) {
+            const catFilter = buildCategoryFilter(categories);
+            if (catFilter) filter.categories = catFilter;
+        }
+        if (isFeatured !== undefined) filter.isFeatured = isFeatured === 'true' || isFeatured === true;
+
+        if (minPrice || maxPrice) {
+            filter['price.perPerson'] = {};
+            if (minPrice) filter['price.perPerson'].$gte = Number(minPrice);
+            if (maxPrice) filter['price.perPerson'].$lte = Number(maxPrice);
+        }
+
+        const skip = (Number(page) - 1) * Number(limit);
+
+        // One-by-one round-robin mix: Most Saved -> Most Booked -> Most Clicked -> 2nd Saved -> 2nd Booked -> 2nd Clicked...
+        if (sort === 'bookings' || sort === 'loved') {
+            const total = await this.postModel.countDocuments(filter);
+            const neededLimit = skip + Number(limit);
+
+            const [topSaved, topBooked, topClicked] = await Promise.all([
+                this.postModel.find({ ...filter, savesCount: { $gt: 0 } })
+                    .select(LISTING_CARD_PROJECTION)
+                    .populate('user', 'firstname lastname email role avatar hostStatus verifyBadge')
+                    .sort({ savesCount: -1, createdAt: -1 })
+                    .limit(neededLimit),
+                this.postModel.find({ ...filter, bookingCount: { $gt: 0 } })
+                    .select(LISTING_CARD_PROJECTION)
+                    .populate('user', 'firstname lastname email role avatar hostStatus verifyBadge')
+                    .sort({ bookingCount: -1, createdAt: -1 })
+                    .limit(neededLimit),
+                this.postModel.find(filter)
+                    .select(LISTING_CARD_PROJECTION)
+                    .populate('user', 'firstname lastname email role avatar hostStatus verifyBadge')
+                    .sort({ clicks: -1, createdAt: -1 })
+                    .limit(neededLimit)
+            ]);
+
+            const mergedPosts: any[] = [];
+            const seenIds = new Set<string>();
+            const maxLen = Math.max(topSaved.length, topBooked.length, topClicked.length);
+
+            for (let i = 0; i < maxLen; i++) {
+                if (i < topSaved.length) {
+                    const idStr = topSaved[i]._id.toString();
+                    if (!seenIds.has(idStr)) {
+                        seenIds.add(idStr);
+                        mergedPosts.push(topSaved[i]);
+                    }
+                }
+                if (i < topBooked.length) {
+                    const idStr = topBooked[i]._id.toString();
+                    if (!seenIds.has(idStr)) {
+                        seenIds.add(idStr);
+                        mergedPosts.push(topBooked[i]);
+                    }
+                }
+                if (i < topClicked.length) {
+                    const idStr = topClicked[i]._id.toString();
+                    if (!seenIds.has(idStr)) {
+                        seenIds.add(idStr);
+                        mergedPosts.push(topClicked[i]);
+                    }
+                }
+            }
+
+            const paginatedPosts = mergedPosts.slice(skip, skip + Number(limit));
+
+            return {
+                count: paginatedPosts.length,
+                total,
+                page: Number(page),
+                totalPages: Math.ceil(total / Number(limit)),
+                posts: paginatedPosts
+            };
+        }
+
+        let sortObj: any = { createdAt: -1 }; // Default to newest
+        if (sort === 'latest') sortObj = { createdAt: -1 };
+        else if (sort === 'clicks') sortObj = { clicks: -1, createdAt: -1 };
+        else if (sort === 'rating') sortObj = { 'rating.average': -1, 'rating.count': -1, createdAt: -1 };
+        else if (isFeatured === 'true' || isFeatured === true) sortObj = { clicks: -1, createdAt: -1 };
+        else sortObj = { clicks: -1, createdAt: -1 }; // Fallback clicks sort
+
+        const posts = await this.postModel.find(filter)
+            .select(LISTING_CARD_PROJECTION)
+            .populate('user', 'firstname lastname email role avatar hostStatus verifyBadge')
+            .sort(sortObj)
+            .limit(Number(limit))
+            .skip(skip);
+
+        const total = await this.postModel.countDocuments(filter);
+
+        return {
+            count: posts.length,
+            total,
+            page: Number(page),
+            totalPages: Math.ceil(total / Number(limit)),
+            posts
+        };
+    }
+
+    /**
+     * Service: Get single post details including reviews, reaction statistics, and host rating
+     */
+    public async getPostDetail(postId: string): Promise<PostDetailResult> {
+        const post = await this.postModel.findById(postId)
+            .populate('user', 'firstname lastname email role avatar description location hostDetails hostStatus isHostVerified verifiedBadge createdAt');
+
+        if (!post) {
+            const error: any = new Error("Post not found");
+            error.statusCode = 404;
+            throw error;
+        }
+
+        post.clicks = (post.clicks || 0) + 1;
+        await this.postModel.updateOne({ _id: post._id }, { $inc: { clicks: 1 } });
+
+        const reviews = await this.reactionService.getPostReviews(postId);
+
+        const reactionStats: Record<string, number> = {};
+        if (post.reactions) {
+            post.reactions.forEach((r: any) => {
+                if (r.emoji) reactionStats[r.emoji] = (reactionStats[r.emoji] || 0) + 1;
+            });
+        }
+
+        const similarPosts = await this.postModel.find({
+            postType: post.postType,
+            status: 'active',
+            _id: { $ne: post._id },
+            $or: [
+                { categories: { $in: post.categories || [] } },
+                { 'location.city': post.location?.city }
+            ]
+        }).limit(6);
+
+        // Host rating calculated via userService (separation of concerns)
+        const hostId = post.user?._id;
+        let hostRating = { average: 0, count: 0 };
+        if (hostId) {
+            hostRating = await this.userService.getHostRating(hostId.toString());
+        }
+
+        return {
+            post: {
+                ...(typeof post.toObject === 'function' ? post.toObject() : post),
+                reactionStats,
+                reactionCount: post.reactions?.length || 0,
+                user: post.user ? { ...(typeof post.user.toObject === 'function' ? post.user.toObject() : post.user), hostRating } : null
+            },
+            reviews: { count: reviews.length, data: reviews },
+            similarPosts
+        };
+    }
+
+    /**
+     * Service: Get top-rated treks aggregated from reviews
+     */
+    public async getTopRatedTreks(options: GetTopRatedTreksOptions = {}): Promise<TopRatedTreksResult> {
+        const { limit = 10, page = 1, minRating = 0 } = options;
+        const skip = (Number(page) - 1) * Number(limit);
+
+        const totalFilter = { postType: 'trek', status: 'active' };
+        const total = await this.postModel.countDocuments(totalFilter);
+
+        const topRatedTreks = await this.reviewModel.aggregate([
+            { $match: { post: { $exists: true, $ne: null } } },
+            { $group: { _id: '$post', averageRating: { $avg: '$rating' }, reviewCount: { $sum: 1 } } },
+            { $match: { averageRating: { $gte: Number(minRating) } } },
+            { $sort: { averageRating: -1, reviewCount: -1 } },
+            { $lookup: { from: 'posts', localField: '_id', foreignField: '_id', as: 'postDetails' } },
+            { $unwind: '$postDetails' },
+            { $match: { 'postDetails.postType': 'trek', 'postDetails.status': 'active' } },
+            { $skip: skip },
+            { $limit: Number(limit) },
+            { $lookup: { from: 'users', localField: 'postDetails.user', foreignField: '_id', as: 'userDetails' } },
+            { $project: {
+                _id: '$postDetails._id',
+                title: '$postDetails.title',
+                description: '$postDetails.description',
+                postType: '$postDetails.postType',
+                photos: '$postDetails.photos',
+                location: '$postDetails.location',
+                price: '$postDetails.price',
+                duration: '$postDetails.duration',
+                difficulty: '$postDetails.difficulty',
+                categories: '$postDetails.categories',
+                isFeatured: '$postDetails.isFeatured',
+                status: '$postDetails.status',
+                approvedAt: '$postDetails.approvedAt',
+                createdAt: '$postDetails.createdAt',
+                user: { $arrayElemAt: ['$userDetails', 0] },
+                averageRating: { $round: ['$averageRating', 1] },
+                reviewCount: '$reviewCount'
+            }}
+        ]);
+
+        return {
+            count: topRatedTreks.length,
+            total,
+            page: Number(page),
+            totalPages: Math.ceil(total / Number(limit)),
+            treks: topRatedTreks
+        };
+    }
+
+    /**
+     * Service: Get nearby treks / experiences by geographic coordinates (or Dehradun fallback)
+     */
+    public async getNearbyTreks(options: GetNearbyTreksOptions = {}): Promise<NearbyTreksResult> {
+        const { latitude, longitude, limit = 20, page = 1, difficulty, minPrice, maxPrice, categories } = options;
+        const skip = (Number(page) - 1) * Number(limit);
+
+        const filter: any = {
+            postType: { $in: ['experience', 'service', 'trek', 'plan'] },
+            status: 'active'
+        };
+
+        if (difficulty) filter.difficulty = difficulty;
+        if (categories) {
+            const catFilter = buildCategoryFilter(categories);
+            if (catFilter) filter.categories = catFilter;
+        }
+        if (minPrice || maxPrice) {
+            filter['price.perPerson'] = {};
+            if (minPrice) filter['price.perPerson'].$gte = Number(minPrice);
+            if (maxPrice) filter['price.perPerson'].$lte = Number(maxPrice);
+        }
+
+        const total = await this.postModel.countDocuments(filter);
+
+        const lat = parseFloat(String(latitude));
+        const lng = parseFloat(String(longitude));
+        const hasValidCoords = !isNaN(lat) && !isNaN(lng);
+
+        if (hasValidCoords) {
+            filter['location.coordinates'] = {
+                $near: {
+                    $geometry: { type: 'Point', coordinates: [lng, lat] }
+                }
+            };
+            const treks = await this.postModel.find(filter)
+                .select(LISTING_CARD_PROJECTION)
+                .populate('user', 'firstname lastname email role avatar hostStatus verifyBadge')
+                .limit(Number(limit))
+                .skip(skip);
+            const treksWithDistance = attachDistanceToTreks(treks, lat, lng);
+            return {
+                count: treksWithDistance.length,
+                total,
+                page: Number(page),
+                totalPages: Math.ceil(total / Number(limit)),
+                treks: treksWithDistance
+            };
+        } else {
+            // No coordinates or invalid coordinates provided: return Dehradun (lat 30.3165, lng 78.0322) experiences first (within 50km), then remaining sorted by newest
+            const dehradunLat = 30.3165;
+            const dehradunLng = 78.0322;
+            const maxNeeded = skip + Number(limit);
+
+            // 1. Fetch experiences near Dehradun (within 50km)
+            const dehradunFilter = { ...filter };
+            dehradunFilter['location.coordinates'] = {
+                $near: {
+                    $geometry: { type: 'Point', coordinates: [dehradunLng, dehradunLat] },
+                    $maxDistance: 50000 // 50km in meters
+                }
+            };
+
+            let dehradunTreks: any[] = [];
+            try {
+                dehradunTreks = await this.postModel.find(dehradunFilter)
+                    .select(LISTING_CARD_PROJECTION)
+                    .populate('user', 'firstname lastname email role avatar hostStatus verifyBadge')
+                    .limit(maxNeeded);
+            } catch (err: any) {
+                console.error("Error fetching Dehradun fallback treks:", err);
+            }
+
+            const dehradunTreksWithDistance = attachDistanceToTreks(dehradunTreks, dehradunLat, dehradunLng);
+
+            // 2. Fetch other active experiences excluding Dehradun ones, sorted by newest
+            const dehradunIds = dehradunTreks.map((t: any) => t._id.toString());
+            const fallbackFilter = { ...filter, _id: { $nin: dehradunIds } };
+            
+            const remainingLimit = Math.max(0, maxNeeded - dehradunTreks.length);
+            let fallbackTreks: any[] = [];
+            if (remainingLimit > 0) {
+                fallbackTreks = await this.postModel.find(fallbackFilter)
+                    .select(LISTING_CARD_PROJECTION)
+                    .populate('user', 'firstname lastname email role avatar hostStatus verifyBadge')
+                    .sort({ createdAt: -1 })
+                    .limit(remainingLimit);
+            }
+
+            const combinedTreks = [...dehradunTreksWithDistance, ...fallbackTreks];
+            const paginatedTreks = combinedTreks.slice(skip, skip + Number(limit));
+
+            return { 
+                count: paginatedTreks.length, 
+                total, 
+                page: Number(page), 
+                totalPages: Math.ceil(total / Number(limit)), 
+                treks: paginatedTreks 
+            };
+        }
+    }
+
+    /**
+     * Service: Get posts by a specific user
+     */
+    public async getUserPosts(userId: string, postType?: string): Promise<any[]> {
+        const filter: any = { user: userId };
+        if (postType) filter.postType = postType;
+
+        return await this.postModel.find(filter)
+            .select(LISTING_CARD_PROJECTION)
+            .populate('user', 'firstname lastname email role avatar hostStatus verifyBadge')
+            .sort({ createdAt: -1 });
+    }
+
+    /**
+     * Service: Get pending posts for admin review
+     */
+    public async getPendingPosts(options: GetPendingPostsOptions = {}): Promise<PaginatedPostsResult> {
+        const { postType = 'experience', page = 1, limit = 20 } = options;
+        const skip = (Number(page) - 1) * Number(limit);
+        const filter = { postType, status: 'pending' };
+
+        const posts = await this.postModel.find(filter)
+            .select(LISTING_CARD_PROJECTION)
+            .populate('user', 'firstname lastname email role avatar hostStatus verifyBadge')
+            .sort({ createdAt: -1 })
+            .limit(Number(limit))
+            .skip(skip);
+        const total = await this.postModel.countDocuments(filter);
+
+        return {
+            count: posts.length,
+            total,
+            page: Number(page),
+            totalPages: Math.ceil(total / Number(limit)),
+            posts
+        };
+    }
+
+    /**
+     * Service: Get category recent activity and highlight status
+     */
+    public async getCategoryActivity(): Promise<CategoryActivityResult[]> {
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+        const activity = await this.postModel.aggregate([
+            { 
+                $match: { 
+                    status: 'active', 
+                    isHidden: { $ne: true } 
+                } 
+            },
+            { $unwind: "$categories" },
+            {
+                $group: {
+                    _id: { $toLower: "$categories" },
+                    categoryName: { $first: "$categories" },
+                    latestApprovedAt: {
+                        $max: {
+                            $ifNull: ["$approvedAt", "$createdAt"]
+                        }
+                    },
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { latestApprovedAt: -1 } }
+        ]);
+
+        return activity.map((item: any) => ({
+            category: item.categoryName,
+            normalizedCategory: item._id,
+            latestApprovedAt: item.latestApprovedAt,
+            count: item.count,
+            isNew: item.latestApprovedAt ? new Date(item.latestApprovedAt) >= twentyFourHoursAgo : false
+        }));
     }
 }
 

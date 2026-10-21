@@ -254,6 +254,68 @@ export class ProfileService {
     }
 
     /**
+     * Service: Add post to user saved posts
+     */
+    public async addSavedPost(userId: string, postId: string): Promise<boolean> {
+        const user = await this.userModel.findById(userId);
+        if (!user) {
+            const error: any = new Error("User not found");
+            error.statusCode = 404;
+            throw error;
+        }
+        const alreadySaved = user.savedPosts?.some((p: any) => p.toString() === postId.toString());
+        if (!alreadySaved) {
+            await this.userModel.findByIdAndUpdate(userId, { $addToSet: { savedPosts: postId } });
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Service: Remove post from user saved posts
+     */
+    public async removeSavedPost(userId: string, postId: string): Promise<boolean> {
+        const user = await this.userModel.findById(userId);
+        if (!user) {
+            const error: any = new Error("User not found");
+            error.statusCode = 404;
+            throw error;
+        }
+        const alreadySaved = user.savedPosts?.some((p: any) => p.toString() === postId.toString());
+        if (alreadySaved) {
+            await this.userModel.findByIdAndUpdate(userId, { $pull: { savedPosts: postId } });
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Service: Calculate host rating statistics (average and count)
+     */
+    public async getHostRating(hostId: string): Promise<{ average: number; count: number }> {
+        if (!hostId) return { average: 0, count: 0 };
+        const mongoose = require("mongoose");
+        const hostObjectId = new mongoose.Types.ObjectId(hostId);
+        const hostPosts = await this.postModel.find({ user: hostObjectId }).select('_id');
+        const hostPostIds = hostPosts.map((p: any) => p._id);
+        const baseMatch = hostPostIds.length > 0
+            ? { $or: [{ host: hostObjectId }, { post: { $in: hostPostIds } }] }
+            : { host: hostObjectId };
+
+        const hostStats = await this.reviewModel.aggregate([
+            { $match: baseMatch },
+            { $group: { _id: null, average: { $avg: '$rating' }, count: { $sum: 1 } } }
+        ]);
+        if (hostStats.length > 0) {
+            return {
+                average: Math.round(hostStats[0].average * 10) / 10,
+                count: hostStats[0].count
+            };
+        }
+        return { average: 0, count: 0 };
+    }
+
+    /**
      * Service: Get user profile with posts and ratings
      */
     public async getProfile(

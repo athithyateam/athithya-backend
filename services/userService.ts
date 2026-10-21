@@ -71,6 +71,18 @@ export class UserService {
         return this.profileService.getSavedPosts(userId);
     }
 
+    public async addSavedPost(userId: string, postId: string): Promise<boolean> {
+        return this.profileService.addSavedPost(userId, postId);
+    }
+
+    public async removeSavedPost(userId: string, postId: string): Promise<boolean> {
+        return this.profileService.removeSavedPost(userId, postId);
+    }
+
+    public async getHostRating(hostId: string): Promise<{ average: number; count: number }> {
+        return this.profileService.getHostRating(hostId);
+    }
+
     public async getProfile(
         userId: string,
         page?: number | string,
@@ -158,8 +170,16 @@ export class UserService {
 export const userService = UserService.getInstance();
 export default UserService;
 
+// Convenience function exports
+export const addSavedPost = (userId: string, postId: string) => userService.addSavedPost(userId, postId);
+export const removeSavedPost = (userId: string, postId: string) => userService.removeSavedPost(userId, postId);
+export const getHostRating = (hostId: string) => userService.getHostRating(hostId);
+
 // For backward compatibility with CommonJS require()
 module.exports = userService;
 module.exports.UserService = UserService;
 module.exports.userService = userService;
+module.exports.addSavedPost = addSavedPost;
+module.exports.removeSavedPost = removeSavedPost;
+module.exports.getHostRating = getHostRating;
 module.exports.default = UserService;

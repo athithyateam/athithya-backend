@@ -148,7 +148,7 @@ export class PostReactionService {
      */
     public async getPostReviews(postId: string): Promise<any[]> {
         return await this.reviewModel.find({ post: postId })
-            .populate("reviewer", "firstname lastname avatar")
+            .populate("reviewer", "firstname lastname avatar role")
             .sort({ createdAt: -1 });
     }
 }
