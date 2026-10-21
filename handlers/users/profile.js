@@ -1,5 +1,5 @@
 const { User, Post, Review, Booking, Notification, CommunityPost, Conversation, Message } = require("../../db/mongoose");
-const { deleteFromS3 } = require("../../utils/s3");
+const { deleteFromS3 } = require("../../services/storageService");
 const { profileService } = require("../../services/users/profileService");
 
 /**

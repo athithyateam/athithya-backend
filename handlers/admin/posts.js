@@ -1,6 +1,6 @@
 const { Post, Booking, Notification, HostHistory } = require("../../db/mongoose");
 const { deleteFile } = require("../../services/storageService");
-const { sendHtmlEmail } = require("../../utils/emailService");
+const { sendHtmlEmail } = require("../../services/emailService");
 
 exports.getAllExperiences = async (req, res) => {
     try {

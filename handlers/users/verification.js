@@ -1,4 +1,4 @@
-const { parseIfJson } = require("../../utils/postUtils");
+const { parseIfJson } = require("../../services/posts/postPayloadParser");
 const { verificationService } = require("../../services/users/verificationService");
 
 /**

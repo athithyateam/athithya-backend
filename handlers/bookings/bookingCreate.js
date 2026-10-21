@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 const { Booking, Post, User, Notification, Schedule } = require("../../db/mongoose");
 const { createRazorpayOrder, verifyRazorpaySignature, fetchPaymentDetails } = require("../../utils/razorpay");
-const { sendHtmlEmail } = require("../../utils/emailService");
+const { sendHtmlEmail } = require("../../services/emailService");
 const { triggerHostBookingWelcome } = require("../../utils/hostBookingChatHelper");
 
 exports.createBooking = async (req, res) => {

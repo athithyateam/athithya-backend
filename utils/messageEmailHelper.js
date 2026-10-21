@@ -1,5 +1,5 @@
 const { User } = require("../db/mongoose");
-const { sendHtmlEmail } = require("./emailService");
+const { sendHtmlEmail } = require("../services/emailService");
 
 // In-memory debounce cache to avoid sending dozens of emails if users are chatting rapidly
 // Map<recipientId_senderId, timestamp>

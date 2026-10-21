@@ -1,5 +1,5 @@
 const { User, Notification } = require("../db/mongoose");
-const { sendHtmlEmail } = require("./emailService");
+const { sendHtmlEmail } = require("../services/emailService");
 
 /**
  * Helper to notify all admins via both in-app notification bell (DB + Socket.io)

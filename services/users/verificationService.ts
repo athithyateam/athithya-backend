@@ -1,5 +1,5 @@
 const { User, OTP, Notification } = require("../../db/mongoose");
-const { parseIfJson } = require("../../utils/postUtils");
+const { parseIfJson } = require("../posts/postPayloadParser");
 const brevo = require("@getbrevo/brevo");
 const { generateOTP, sendTemplateEmail } = require("../emailService");
 

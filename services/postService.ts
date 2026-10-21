@@ -18,7 +18,17 @@ import {
     CategoryActivityResult
 } from "./posts/postActionService";
 import { PostReactionService, postReactionService as defaultPostReactionService, ReactToPostResult, ReactionStatsResult, ReactionItem } from "./posts/postReactionService";
-import { calculatePricingAndFees, isValidS3MediaUrl, parsePostPayload } from "./posts/postPayloadParser";
+import { 
+    calculatePricingAndFees, 
+    isValidS3MediaUrl, 
+    parsePostPayload,
+    parseIfJson,
+    LISTING_CARD_PROJECTION,
+    calculateDistance,
+    expandCategories,
+    buildCategoryFilter,
+    attachDistanceToTreks
+} from "./posts/postPayloadParser";
 
 export {
     ReactToPostResult,
@@ -37,7 +47,13 @@ export {
     CategoryActivityResult,
     calculatePricingAndFees,
     isValidS3MediaUrl,
-    parsePostPayload
+    parsePostPayload,
+    parseIfJson,
+    LISTING_CARD_PROJECTION,
+    calculateDistance,
+    expandCategories,
+    buildCategoryFilter,
+    attachDistanceToTreks
 };
 
 export class PostService {
@@ -184,4 +200,10 @@ module.exports.getCategoryActivity = getCategoryActivity;
 module.exports.reactToPost = reactToPost;
 module.exports.getReactionStats = getReactionStats;
 module.exports.getPostReviews = getPostReviews;
+module.exports.parseIfJson = parseIfJson;
+module.exports.LISTING_CARD_PROJECTION = LISTING_CARD_PROJECTION;
+module.exports.calculateDistance = calculateDistance;
+module.exports.expandCategories = expandCategories;
+module.exports.buildCategoryFilter = buildCategoryFilter;
+module.exports.attachDistanceToTreks = attachDistanceToTreks;
 module.exports.default = PostService;

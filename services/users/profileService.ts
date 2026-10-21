@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 const { User, Post, Review, Notification, HostHistory } = require("../../db/mongoose");
 const { deleteFile } = require("../storageService");
-const { parseIfJson } = require("../../utils/postUtils");
+const { parseIfJson } = require("../posts/postPayloadParser");
 const { sendTemplateEmail } = require("../emailService");
 
 export interface LocationData {

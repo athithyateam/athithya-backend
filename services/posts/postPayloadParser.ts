@@ -1,4 +1,91 @@
-const { parseIfJson } = require("../../utils/postUtils");
+/**
+ * Helper to parse JSON fields sent as strings in form-data
+ */
+export function parseIfJson(value: any): any {
+    if (!value) return undefined;
+    if (typeof value === 'object') return value;
+    try {
+        if (typeof value === 'string' && (value.trim().startsWith('{') || value.trim().startsWith('['))) {
+            return JSON.parse(value);
+        }
+    } catch (e) {
+        // not JSON, return as-is
+    }
+    return value;
+}
+
+/**
+ * Standard projection for listing cards
+ */
+export const LISTING_CARD_PROJECTION = "title subtitle postType photos location price duration difficulty categories discounts isFeatured status rating bookingCount savesCount clicks user createdAt approvedAt";
+
+/**
+ * Convert degrees to radians
+ */
+export function toRadians(degrees: number): number {
+    return degrees * (Math.PI / 180);
+}
+
+/**
+ * Calculate distance between two coordinates using Haversine formula
+ */
+export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371; // Earth's radius in kilometers
+    const dLat = toRadians(lat2 - lat1);
+    const dLon = toRadians(lon2 - lon1);
+
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+
+/**
+ * Expand special category names such as 'others' or 'other'
+ */
+export function expandCategories(categories: string | string[]): string[] {
+    if (!categories) return [];
+    const list = Array.isArray(categories) ? categories : String(categories).split(',');
+    return list.flatMap(c => {
+        const trimmed = String(c).trim();
+        const lc = trimmed.toLowerCase();
+        if (lc === 'others' || lc === 'other') {
+            return ['Others', 'Other', 'Rock Climbing', 'Flyboarding', 'rock-climbing', 'flyboarding'];
+        }
+        return [trimmed];
+    });
+}
+
+/**
+ * Build mongo filter for categories query
+ */
+export function buildCategoryFilter(categories: any): any {
+    if (!categories) return undefined;
+    const expCats = expandCategories(categories);
+    const list = Array.isArray(categories) ? categories : String(categories).split(',');
+    const isOtherFilter = list.some((c: any) => ['other', 'others'].includes(String(c).trim().toLowerCase()));
+    if (isOtherFilter) {
+        return { $in: expCats, $nin: ['Safari', 'safari', 'SAFARI'] };
+    }
+    return { $in: expCats };
+}
+
+/**
+ * Attach calculated distance to a list of trek documents
+ */
+export function attachDistanceToTreks(treks: any[], refLat: number, refLng: number): any[] {
+    return (treks || []).map((trek: any) => {
+        const trekObj = typeof trek.toObject === 'function' ? trek.toObject() : { ...trek };
+        if (trek.location?.coordinates?.coordinates) {
+            const [trekLng, trekLat] = trek.location.coordinates.coordinates;
+            trekObj.distance = Math.round(calculateDistance(refLat, refLng, trekLat, trekLng) * 10) / 10;
+            trekObj.distanceUnit = 'km';
+        }
+        return trekObj;
+    });
+}
 
 export interface NormalizedPostFields {
     title?: string;
@@ -126,6 +213,13 @@ export function parsePostPayload(payload: any, basePost: any = null): Normalized
 }
 
 module.exports = {
+    parseIfJson,
+    LISTING_CARD_PROJECTION,
+    calculateDistance,
+    toRadians,
+    expandCategories,
+    buildCategoryFilter,
+    attachDistanceToTreks,
     parsePostPayload,
     calculatePricingAndFees,
     isValidS3MediaUrl

@@ -1,18 +1,20 @@
 const { Post, User, Notification, HostHistory, Booking, Review } = require("../../db/mongoose");
-const { 
-    parseIfJson, 
-    calculateDistance, 
-    buildCategoryFilter, 
-    attachDistanceToTreks, 
-    LISTING_CARD_PROJECTION 
-} = require("../../utils/postUtils");
 const { storageService: defaultStorageService } = require("../storageService");
 const { googleDriveService: defaultGoogleDriveService } = require("../googleDriveService");
 const { emailService: defaultEmailService } = require("../emailService");
 const { notifyAdmins: defaultNotifyAdmins } = require("../../utils/notifyAdminHelper");
 const { userService: defaultUserService } = require("../userService");
 import { PostReactionService, postReactionService as defaultPostReactionService } from "./postReactionService";
-import { parsePostPayload, calculatePricingAndFees, isValidS3MediaUrl } from "./postPayloadParser";
+import { 
+    parsePostPayload, 
+    calculatePricingAndFees, 
+    isValidS3MediaUrl,
+    parseIfJson, 
+    calculateDistance, 
+    buildCategoryFilter, 
+    attachDistanceToTreks, 
+    LISTING_CARD_PROJECTION 
+} from "./postPayloadParser";
 
 export interface GetPostsOptions {
     postType?: string;

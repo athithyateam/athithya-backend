@@ -1,4 +1,4 @@
-const { jwt, jwtkey } = require("../utils/jwt");
+const { authService } = require("../services/authService");
 
 // Helper to extract JWT token from HTTP-only cookie or Authorization header
 const extractToken = (req) => {
@@ -17,7 +17,7 @@ const checkAuth = (req, res, next) => {
             });
         }
 
-        const decoded = jwt.verify(token, jwtkey);
+        const decoded = authService.verifyToken(token);
         req.user = decoded; // Store user info in request
         next();
     } catch (error) {
@@ -103,7 +103,7 @@ const checkOptionalAuth = (req, res, next) => {
     try {
         const token = extractToken(req);
         if (token) {
-            const decoded = jwt.verify(token, jwtkey);
+            const decoded = authService.verifyToken(token);
             req.user = decoded;
         }
         next();
@@ -153,7 +153,7 @@ const checkAuthWithDBVerification = async (req, res, next) => {
             });
         }
 
-        const decoded = jwt.verify(token, jwtkey);
+        const decoded = authService.verifyToken(token);
         const { User } = require("../db/mongoose");
         const user = await User.findById(decoded.userId).select("_id role firstname lastname email hostStatus");
 

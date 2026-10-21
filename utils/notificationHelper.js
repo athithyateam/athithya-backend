@@ -1,5 +1,5 @@
 const { Notification, User } = require("../db/mongoose");
-const { sendHtmlEmail } = require("./emailService");
+const { sendHtmlEmail } = require("../services/emailService");
 
 /**
  * Creates an in-app notification, emits it via Socket.io in real-time,

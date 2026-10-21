@@ -1,5 +1,5 @@
 const { User, Notification, HostHistory } = require("../../db/mongoose");
-const { sendHtmlEmail } = require("../../utils/emailService");
+const { sendHtmlEmail } = require("../../services/emailService");
 const { deleteFile } = require("../../services/storageService");
 
 const saveHostOldDetails = async (user, changedFields = []) => {

@@ -1,5 +1,5 @@
 const { Booking, Notification } = require("../../db/mongoose");
-const { sendHtmlEmail } = require("../../utils/emailService");
+const { sendHtmlEmail, generateOTP, sendOTPEmail } = require("../../services/emailService");
 
 exports.acceptBooking = async (req, res) => {
     try {
@@ -207,7 +207,6 @@ exports.approveCancellation = async (req, res) => {
     }
 };
 
-const { generateOTP, sendOTPEmail } = require("../../utils/emailService");
 
 exports.sendStartOTP = async (req, res) => {
     try {
@@ -322,7 +321,6 @@ exports.verifyStartOTP = async (req, res) => {
                 </div>
             </div>
         `;
-        const { sendHtmlEmail } = require("../../utils/emailService");
         sendHtmlEmail(adminEmail, adminSubject, adminHtml).catch(err => console.error("Failed to send admin journey start email:", err));
 
         // Create notification for Guest
@@ -484,7 +482,6 @@ exports.verifyCompletionOTP = async (req, res) => {
                 </div>
             </div>
         `;
-        const { sendHtmlEmail } = require("../../utils/emailService");
         sendHtmlEmail(adminEmail, adminSubject, adminHtml).catch(err => console.error("Failed to send admin journey complete email:", err));
 
         // Create notification for Guest to share review

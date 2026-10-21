@@ -1,9 +1,13 @@
 import bcrypt from "bcryptjs";
 import axios from "axios";
-import { User, OTP } from "../db/mongoose";
-import { jwt, jwtkey } from "../utils/jwt";
-import { generateOTP, sendOTPEmail, sendTemplateEmail } from "./emailService";
-import { triggerNewUserWelcome } from "../utils/onboardingHelper";
+import jwt from "jsonwebtoken";
+import { User, OTP, Conversation, Message } from "../db/mongoose";
+import { generateOTP, sendOTPEmail, sendTemplateEmail, sendHtmlEmail } from "./emailService";
+
+const defaultJwtSecret = process.env.JWT_SECRET || "";
+if (!defaultJwtSecret && process.env.NODE_ENV === "production") {
+    throw new Error("JWT_SECRET environment variable is required but not set.");
+}
 
 export interface FormattedAuthUser {
     id: string;
@@ -33,15 +37,18 @@ export interface EmailNotifier {
         senderName?: string;
         senderEmail?: string;
     }) => Promise<any>;
+    sendHtmlEmail?: (email: string, subject: string, htmlContent: string) => Promise<any>;
 }
 
 export interface AuthDependencies {
     userModel?: any;
     otpModel?: any;
+    conversationModel?: any;
+    messageModel?: any;
     jwtSigner?: typeof jwt;
     jwtSecret?: string;
     emailNotifier?: EmailNotifier;
-    welcomeNotifier?: typeof triggerNewUserWelcome;
+    welcomeNotifier?: (reqOrIo: any, user: any) => Promise<void>;
 }
 
 export default class AuthService {
@@ -50,10 +57,12 @@ export default class AuthService {
 
     private userModel: any;
     private otpModel: any;
+    private conversationModel: any;
+    private messageModel: any;
     private jwtSigner: typeof jwt;
     private jwtSecret: string;
     private emailNotifier: EmailNotifier;
-    private welcomeNotifier: typeof triggerNewUserWelcome;
+    private welcomeNotifier?: (reqOrIo: any, user: any) => Promise<void>;
 
     constructor(instanceKey: symbol, deps: AuthDependencies = {}) {
         if (instanceKey !== AuthService.instanceKey) {
@@ -62,14 +71,30 @@ export default class AuthService {
 
         this.userModel = deps.userModel || User;
         this.otpModel = deps.otpModel || OTP;
+        this.conversationModel = deps.conversationModel || Conversation;
+        this.messageModel = deps.messageModel || Message;
         this.jwtSigner = deps.jwtSigner || jwt;
-        this.jwtSecret = deps.jwtSecret || jwtkey;
+        this.jwtSecret = deps.jwtSecret || defaultJwtSecret;
         this.emailNotifier = deps.emailNotifier || {
             generateOTP,
             sendOTPEmail,
-            sendTemplateEmail
+            sendTemplateEmail,
+            sendHtmlEmail
         };
-        this.welcomeNotifier = deps.welcomeNotifier || triggerNewUserWelcome;
+        this.welcomeNotifier = deps.welcomeNotifier;
+
+        this.generateAuthToken = this.generateAuthToken.bind(this);
+        this.verifyToken = this.verifyToken.bind(this);
+        this.triggerNewUserWelcome = this.triggerNewUserWelcome.bind(this);
+        this.formatAuthUser = this.formatAuthUser.bind(this);
+        this.notifyAdminNewUserSignup = this.notifyAdminNewUserSignup.bind(this);
+        this.initiateSignup = this.initiateSignup.bind(this);
+        this.completeSignup = this.completeSignup.bind(this);
+        this.signin = this.signin.bind(this);
+        this.googleSignin = this.googleSignin.bind(this);
+        this.forgotPassword = this.forgotPassword.bind(this);
+        this.resetPassword = this.resetPassword.bind(this);
+        this.getCurrentUser = this.getCurrentUser.bind(this);
     }
 
     /**
@@ -91,6 +116,13 @@ export default class AuthService {
             this.jwtSecret,
             { expiresIn: "30d" }
         );
+    }
+
+    /**
+     * Verify and decode a JWT token
+     */
+    public verifyToken(token: string): any {
+        return this.jwtSigner.verify(token, this.jwtSecret);
     }
 
     /**
@@ -131,6 +163,142 @@ export default class AuthService {
         }).catch((err: any) =>
             console.error("Failed to send admin signup notification email:", err)
         );
+    }
+
+    /**
+     * Handle new user onboarding:
+     * 1. Find or create the "Athithya Official" admin account in DB with profile avatar.
+     * 2. Send an auto-generated welcome chat message from Athithya Official to the new user.
+     * 3. Send a branded welcome email to the new user.
+     */
+    public async triggerNewUserWelcome(reqOrIo: any, user: any): Promise<void> {
+        if (this.welcomeNotifier) {
+            return this.welcomeNotifier(reqOrIo, user);
+        }
+
+        try {
+            if (!user || !user._id) return;
+
+            // 1. Locate or create "Athithya Official" admin user
+            let adminUser = await this.userModel.findOne({
+                $or: [
+                    { firstname: "Athithya", lastname: "Official" },
+                    { role: "admin", firstname: /athithya/i }
+                ]
+            });
+
+            if (!adminUser) {
+                adminUser = await this.userModel.findOne({ role: "admin" });
+            }
+
+            if (!adminUser) {
+                const hashedPass = await bcrypt.hash(Math.random().toString(36), 10);
+                adminUser = await this.userModel.create({
+                    firstname: "Athithya",
+                    lastname: "Official",
+                    email: "teamsathithya@gmail.com",
+                    password: hashedPass,
+                    role: "admin",
+                    isVerified: true,
+                    avatar: { url: "/athithya-logo.png" }
+                });
+            } else {
+                let updated = false;
+                if (adminUser.firstname === "Admin" || !adminUser.firstname) {
+                    adminUser.firstname = "Athithya";
+                    adminUser.lastname = "Official";
+                    updated = true;
+                }
+                if (!adminUser.avatar || !adminUser.avatar.url) {
+                    adminUser.avatar = { url: "/athithya-logo.png" };
+                    updated = true;
+                }
+                if (updated) {
+                    await adminUser.save();
+                }
+            }
+
+            // 2. Prepare welcome message text based on role
+            const isHost = user.role === "host";
+            const roleText = isHost ? "host" : "guest";
+            const firstName = user.firstname || (isHost ? "Host" : "Guest");
+            const welcomeChatText = `Dear ${roleText} ${firstName}, Welcome to Athithya! Thank you for creating an account as a ${roleText} in Athithya! If you have any queries, feel free to share them with us.`;
+
+            // 3. Create or find 1-on-1 Conversation between Admin and New User
+            let conversation = await this.conversationModel.findOne({
+                participants: { $all: [adminUser._id, user._id], $size: 2 }
+            });
+
+            if (!conversation) {
+                const unreadMap = new Map();
+                unreadMap.set(adminUser._id.toString(), 0);
+                unreadMap.set(user._id.toString(), 1);
+
+                conversation = await this.conversationModel.create({
+                    participants: [adminUser._id, user._id],
+                    unreadCounts: unreadMap
+                });
+            }
+
+            // 4. Create Message from Admin to User
+            const message = await this.messageModel.create({
+                conversationId: conversation._id,
+                sender: adminUser._id,
+                recipient: user._id,
+                text: welcomeChatText,
+                messageType: "text"
+            });
+
+            // 5. Update Conversation metadata
+            const targetUserId = user._id.toString();
+            await this.conversationModel.findByIdAndUpdate(conversation._id, {
+                $set: {
+                    lastMessage: {
+                        text: welcomeChatText,
+                        sender: adminUser._id,
+                        createdAt: new Date()
+                    },
+                    [`unreadCounts.${targetUserId}`]: 1
+                }
+            });
+
+            // 6. Real-time Socket.io broadcast to new user
+            const io = reqOrIo?.app?.get ? reqOrIo.app.get("io") : (reqOrIo?.io || reqOrIo);
+            if (io && typeof io.to === "function") {
+                const populatedMsg = await this.messageModel.findById(message._id).populate("sender", "firstname lastname avatar");
+                io.to(targetUserId).emit("new_message", populatedMsg);
+            }
+
+            // 7. Send Welcome Email to User
+            const emailSubject = "Welcome to Athithya!";
+            const emailHtml = `
+                <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 16px; background-color: #ffffff;">
+                    <div style="background-color: #1a1a1a; padding: 25px; border-radius: 12px 12px 0 0; text-align: center;">
+                        <h1 style="color: #C59A2F; margin: 0; font-size: 26px; letter-spacing: 3px; font-weight: 800;">ATHITHYA</h1>
+                    </div>
+                    <div style="padding: 30px 25px;">
+                        <h2 style="color: #111827; margin-top: 0; font-size: 20px;">Welcome to Athithya, ${firstName}!</h2>
+                        <p style="color: #374151; font-size: 15px; line-height: 1.6; margin-bottom: 20px;">
+                            Dear ${roleText} <strong>${firstName}</strong>, Thank you for creating an account as a <strong>${roleText}</strong> in Athithya! If you have any queries, feel free to share them with us.
+                        </p>
+                        <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
+                            Best regards,<br>
+                            <strong style="color: #111827;">The Athithya Team</strong>
+                        </p>
+                    </div>
+                    <div style="background-color: #f9fafb; padding: 15px; border-radius: 0 0 12px 12px; text-align: center; border-top: 1px solid #f3f4f6;">
+                        <p style="color: #9ca3af; font-size: 12px; margin: 0;">&copy; ${new Date().getFullYear()} Athithya. All rights reserved.</p>
+                    </div>
+                </div>
+            `;
+
+            const emailSender = this.emailNotifier.sendHtmlEmail || sendHtmlEmail;
+            emailSender(user.email, emailSubject, emailHtml).catch((err: any) => {
+                console.error("Failed to send welcome email:", err);
+            });
+        } catch (err) {
+            console.error("Error in triggerNewUserWelcome onboarding helper:", err);
+        }
     }
 
     /**
@@ -220,7 +388,7 @@ export default class AuthService {
         });
 
         if (io) {
-            this.welcomeNotifier({ io }, user).catch((err: any) =>
+            this.triggerNewUserWelcome({ io }, user).catch((err: any) =>
                 console.error("Onboarding welcome error:", err)
             );
         }
@@ -304,7 +472,7 @@ export default class AuthService {
 
         if (isNewUser) {
             if (io) {
-                this.welcomeNotifier({ io }, user).catch((err: any) =>
+                this.triggerNewUserWelcome({ io }, user).catch((err: any) =>
                     console.error("Onboarding welcome error:", err)
                 );
             }
@@ -423,3 +591,11 @@ export default class AuthService {
 
 // Default singleton export
 export const authService = AuthService.getInstance();
+export const verifyToken = authService.verifyToken;
+export const triggerNewUserWelcome = authService.triggerNewUserWelcome;
+
+// CommonJS compatibility
+module.exports = authService;
+module.exports.default = AuthService;
+module.exports.AuthService = AuthService;
+module.exports.authService = authService;
