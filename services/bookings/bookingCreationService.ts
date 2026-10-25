@@ -3,6 +3,7 @@ import { Booking, Post, User, Schedule } from "../../db/mongoose";
 import { createRazorpayOrder, verifyRazorpaySignature, fetchPaymentDetails } from "../../utils/razorpay";
 import { sendHtmlEmail, renderBrandedEmail } from "../emailService";
 import { notificationService } from "../notificationService";
+import { getPlatformFeeRate } from "../posts/postPayloadParser";
 const { triggerHostBookingWelcome } = require("../../utils/hostBookingChatHelper");
 
 export interface CreateBookingInput {
@@ -60,7 +61,7 @@ export function calculateBookingPricing(
     const baseAmount = isNaN(rawBase) ? 0 : Math.max(0, rawBase);
 
     const unitPrice = Number(post.price?.perPerson || post.price?.amount || post.price?.total || 0);
-    const feeRate = unitPrice < 2000 ? 0.05 : unitPrice <= 5000 ? 0.035 : 0.02;
+    const feeRate = getPlatformFeeRate(unitPrice);
     const rawFee = unitPrice * feeRate;
     const feePerPerson = rawFee < 1 ? Number(rawFee.toFixed(2)) : Math.round(rawFee);
     const platformFee = post.price?.perPerson ? (feePerPerson * numberOfPeople) : feePerPerson;

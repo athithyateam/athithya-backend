@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { User, Post, Review, Notification, HostHistory } from "../../db/mongoose";
 import { deleteFile } from "../storageService";
-import { parseIfJson } from "../posts/postPayloadParser";
+import { parseIfJson, recordHostHistory } from "../posts/postPayloadParser";
 import { sendTemplateEmail } from "../emailService";
 import { notificationService } from "../notificationService";
 import { normalizePhoneNumber, renderDocumentListHtml } from "./verificationService";
@@ -149,10 +149,11 @@ export class ProfileService {
      * Record host's previous details to HostHistory collection (scoped per host)
      */
     public async saveHostOldDetails(user: any, changedFields: string[] = []): Promise<void> {
-        try {
-            if (!user || user.role !== "host") return;
-            const hostName = `${user.firstname} ${user.lastname}`;
-            await this.hostHistoryModel.create({
+        if (!user || user.role !== "host") return;
+        const hostName = `${user.firstname} ${user.lastname}`;
+        await recordHostHistory(
+            this.hostHistoryModel,
+            {
                 type: "profile_update",
                 hostId: user._id,
                 hostName: hostName,
@@ -166,17 +167,10 @@ export class ProfileService {
                 phone: user.hostDetails?.phone || "",
                 email: user.email || "",
                 aadhaarCard: user.hostDetails?.aadhaarCard || []
-            });
-
-            // Prune to only keep last 10 entries per host
-            const items = await this.hostHistoryModel.find({ hostId: user._id, type: "profile_update" }).sort({ createdAt: -1 });
-            if (items.length > 10) {
-                const idsToDelete = items.slice(10).map((item: any) => item._id);
-                await this.hostHistoryModel.deleteMany({ _id: { $in: idsToDelete } });
-            }
-        } catch (err) {
-            console.error("Error saving host old details to history:", err);
-        }
+            },
+            { hostId: user._id, type: "profile_update" },
+            10
+        );
     }
 
     /**
