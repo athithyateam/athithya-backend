@@ -119,8 +119,16 @@ export class UserService {
         return this.verificationService.normalizePhoneNumber(phone);
     }
 
+    public async requestPhoneVerification(phone: string, userId?: string): Promise<{ phone: string }> {
+        return this.verificationService.requestPhoneVerification(phone, userId);
+    }
+
     public async sendPhoneOTP(phone: string, userId?: string): Promise<{ phone: string }> {
         return this.verificationService.sendPhoneOTP(phone, userId);
+    }
+
+    public async verifyAndLinkPhone(phone: string, otp: string, userId: string): Promise<boolean> {
+        return this.verificationService.verifyAndLinkPhone(phone, otp, userId);
     }
 
     public async verifyPhoneOTP(phone: string, otp: string, userId: string): Promise<boolean> {

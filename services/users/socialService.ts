@@ -1,4 +1,4 @@
-const { User, Notification, Conversation, Message } = require("../../db/mongoose");
+import { User, Notification, Conversation, Message } from "../../db/mongoose";
 import { notificationService } from "../notificationService";
 
 export class SocialService {
@@ -50,6 +50,15 @@ export class SocialService {
     }
 
     /**
+     * Broadcast social status update to both involved users
+     */
+    private emitSocialStatus(user1: string, user2: string, status: string): void {
+        const payload = { requesterId: user1, targetId: user2, status };
+        this.notificationSvc.emitToUser(user1, "social_status_updated", payload);
+        this.notificationSvc.emitToUser(user2, "social_status_updated", payload);
+    }
+
+    /**
      * Service: Send friend request
      */
     public async sendFriendRequest(targetUserId: string, currentUserId: string): Promise<boolean> {
@@ -94,20 +103,11 @@ export class SocialService {
             message: `${currentUser.firstname} wants to be friends`,
             type: "friend_request",
             link: `/profile/${currentUserId}`,
-            metadata: { userId: currentUserId }
+            metadata: { userId: currentUserId },
+            idempotencyKey: `friend_req_${currentUserId}_${targetUserId}`
         });
 
-        this.notificationSvc.emitToUser(targetUserId, "social_status_updated", {
-            requesterId: currentUserId,
-            targetId: targetUserId,
-            status: "requested"
-        });
-        this.notificationSvc.emitToUser(currentUserId, "social_status_updated", {
-            requesterId: currentUserId,
-            targetId: targetUserId,
-            status: "requested"
-        });
-
+        this.emitSocialStatus(currentUserId, targetUserId, "requested");
         return true;
     }
 
@@ -154,20 +154,11 @@ export class SocialService {
             message: `${currentUser.firstname} accepted your request`,
             type: "friend_accepted",
             link: `/profile/${currentUserId}`,
-            metadata: { userId: currentUserId }
+            metadata: { userId: currentUserId },
+            idempotencyKey: `friend_accept_${requesterId}_${currentUserId}`
         });
 
-        this.notificationSvc.emitToUser(requesterId, "social_status_updated", {
-            requesterId,
-            targetId: currentUserId,
-            status: "friends"
-        });
-        this.notificationSvc.emitToUser(currentUserId, "social_status_updated", {
-            requesterId,
-            targetId: currentUserId,
-            status: "friends"
-        });
-
+        this.emitSocialStatus(requesterId, currentUserId, "friends");
         return true;
     }
 
@@ -196,17 +187,7 @@ export class SocialService {
             this.notificationSvc.emitToUser(currentUserId, "notification_updated", updatedNotif);
         }
 
-        this.notificationSvc.emitToUser(requesterId, "social_status_updated", {
-            requesterId,
-            targetId: currentUserId,
-            status: "none"
-        });
-        this.notificationSvc.emitToUser(currentUserId, "social_status_updated", {
-            requesterId,
-            targetId: currentUserId,
-            status: "none"
-        });
-
+        this.emitSocialStatus(requesterId, currentUserId, "none");
         return true;
     }
 
@@ -227,17 +208,7 @@ export class SocialService {
             await this.conversationModel.deleteOne({ _id: conversation._id });
         }
 
-        this.notificationSvc.emitToUser(targetUserId, "social_status_updated", {
-            requesterId: currentUserId,
-            targetId: targetUserId,
-            status: "none"
-        });
-        this.notificationSvc.emitToUser(currentUserId, "social_status_updated", {
-            requesterId: currentUserId,
-            targetId: targetUserId,
-            status: "none"
-        });
-
+        this.emitSocialStatus(currentUserId, targetUserId, "none");
         return true;
     }
 
@@ -275,7 +246,7 @@ export class SocialService {
     }
 
     /**
-     * Service: Get guests directory
+     * Service: Get directory of users/guests with pagination and friend status
      */
     public async getGuests(
         currentUserId?: string,

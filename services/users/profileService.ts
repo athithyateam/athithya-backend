@@ -1,9 +1,10 @@
-const mongoose = require("mongoose");
-const { User, Post, Review, Notification, HostHistory } = require("../../db/mongoose");
-const { deleteFile } = require("../storageService");
-const { parseIfJson } = require("../posts/postPayloadParser");
-const { sendTemplateEmail } = require("../emailService");
+import mongoose from "mongoose";
+import { User, Post, Review, Notification, HostHistory } from "../../db/mongoose";
+import { deleteFile } from "../storageService";
+import { parseIfJson } from "../posts/postPayloadParser";
+import { sendTemplateEmail } from "../emailService";
 import { notificationService } from "../notificationService";
+import { normalizePhoneNumber, renderDocumentListHtml } from "./verificationService";
 
 export interface LocationData {
     latitude: number | string;
@@ -73,7 +74,79 @@ export class ProfileService {
     }
 
     /**
-     * Record host's previous details to HostHistory collection
+     * Helper: Parse interests array from various input formats
+     */
+    private parseInterests(interests: any): string[] {
+        if (!interests) return [];
+        if (Array.isArray(interests)) return interests;
+        const parsed = parseIfJson(interests);
+        if (Array.isArray(parsed)) return parsed;
+        if (typeof interests === 'string') {
+            return interests.split(',').map((i: string) => i.trim()).filter(Boolean);
+        }
+        return [];
+    }
+
+    /**
+     * Helper: Determine mutual friendship and pending request status
+     */
+    private getFriendshipStatus(user: any, currentUserIdStr?: string): { isFriend: boolean; isRequestedFriend: boolean } {
+        if (!currentUserIdStr || user._id.toString() === currentUserIdStr) {
+            return { isFriend: false, isRequestedFriend: false };
+        }
+        const isFriend = (user.friends || []).some((id: any) => id && id.toString() === currentUserIdStr);
+        const isRequestedFriend = (user.friendRequests || []).some((id: any) => id && id.toString() === currentUserIdStr);
+        return { isFriend, isRequestedFriend };
+    }
+
+    /**
+     * Helper: Calculate host review statistics, distribution, and current user rating
+     */
+    public async calculateHostReviewStats(hostId: string, currentUserId?: string): Promise<{
+        reviews: any[];
+        reviewStats: any;
+    }> {
+        const hostObjectId = new mongoose.Types.ObjectId(hostId);
+        const allHostReviews = await this.reviewModel.find({ host: hostId })
+            .populate('reviewer', 'firstname lastname avatar')
+            .populate('post', 'title postType')
+            .sort({ createdAt: -1 });
+
+        const writtenReviews = allHostReviews.filter((r: any) => r.comment && r.comment.trim() !== "");
+
+        const totalStats = await this.reviewModel.aggregate([
+            { $match: { host: hostObjectId } },
+            { $group: { _id: '$host', average: { $avg: '$rating' }, count: { $sum: 1 } } }
+        ]);
+
+        let reviewStats: any = null;
+        if (totalStats.length > 0) {
+            const avg = totalStats[0].average || 0;
+            const currentUserIdStr = currentUserId?.toString();
+            const userRatingObj = currentUserIdStr
+                ? await this.reviewModel.findOne({ host: hostId, reviewer: currentUserIdStr, post: null })
+                : null;
+
+            reviewStats = {
+                totalRatings: totalStats[0].count,
+                totalReviews: writtenReviews.length,
+                averageRating: Number(avg.toFixed(1)),
+                currentUserRating: userRatingObj ? userRatingObj.rating : null,
+                ratings: {
+                    5: allHostReviews.filter((r: any) => r.rating === 5).length,
+                    4: allHostReviews.filter((r: any) => r.rating === 4).length,
+                    3: allHostReviews.filter((r: any) => r.rating === 3).length,
+                    2: allHostReviews.filter((r: any) => r.rating === 2).length,
+                    1: allHostReviews.filter((r: any) => r.rating === 1).length
+                }
+            };
+        }
+
+        return { reviews: writtenReviews, reviewStats };
+    }
+
+    /**
+     * Record host's previous details to HostHistory collection (scoped per host)
      */
     public async saveHostOldDetails(user: any, changedFields: string[] = []): Promise<void> {
         try {
@@ -95,8 +168,8 @@ export class ProfileService {
                 aadhaarCard: user.hostDetails?.aadhaarCard || []
             });
 
-            // Prune to only keep last 10 globally
-            const items = await this.hostHistoryModel.find({ type: "profile_update" }).sort({ createdAt: -1 });
+            // Prune to only keep last 10 entries per host
+            const items = await this.hostHistoryModel.find({ hostId: user._id, type: "profile_update" }).sort({ createdAt: -1 });
             if (items.length > 10) {
                 const idsToDelete = items.slice(10).map((item: any) => item._id);
                 await this.hostHistoryModel.deleteMany({ _id: { $in: idsToDelete } });
@@ -163,13 +236,7 @@ export class ProfileService {
 
         const currentUserIdStr = currentUserId?.toString();
         const isOwnProfileOrAdmin = !!(currentUserIdStr && (currentUserIdStr === targetUserId || currentUserRole === 'admin'));
-
-        let isFollowing = false;
-        let isRequested = false;
-        if (currentUserIdStr && targetUserId !== currentUserIdStr) {
-            isFollowing = (user.friends || []).some((id: any) => id.toString() === currentUserIdStr);
-            isRequested = (user.friendRequests || []).some((id: any) => id.toString() === currentUserIdStr);
-        }
+        const { isFriend: isFollowing, isRequestedFriend: isRequested } = this.getFriendshipStatus(user, currentUserIdStr);
 
         const userData = this.getUserFields(user, isOwnProfileOrAdmin);
         return { ...userData, isFollowing, isRequested };
@@ -295,7 +362,6 @@ export class ProfileService {
      */
     public async getHostRating(hostId: string): Promise<{ average: number; count: number }> {
         if (!hostId) return { average: 0, count: 0 };
-        const mongoose = require("mongoose");
         const hostObjectId = new mongoose.Types.ObjectId(hostId);
         const hostPosts = await this.postModel.find({ user: hostObjectId }).select('_id');
         const hostPostIds = hostPosts.map((p: any) => p._id);
@@ -350,19 +416,24 @@ export class ProfileService {
         }
 
         const totalPosts = await this.postModel.countDocuments(baseQuery);
-
         const posts = await this.postModel.find(baseQuery)
             .populate('user', 'firstname lastname avatar role username isHostVerified verifiedBadge')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limitNum);
 
+        const postCounts = await this.postModel.aggregate([
+            { $match: baseQuery },
+            { $group: { _id: '$postType', count: { $sum: 1 } } }
+        ]);
+        const postCountsMap = new Map(postCounts.map((c: any) => [c._id, c.count]));
+
         const postStats = {
             total: totalPosts,
-            experiences: await this.postModel.countDocuments({ ...baseQuery, postType: 'experience' }),
-            services: await this.postModel.countDocuments({ ...baseQuery, postType: 'service' }),
-            treks: await this.postModel.countDocuments({ ...baseQuery, postType: 'trek' }),
-            plans: await this.postModel.countDocuments({ ...baseQuery, postType: 'plan' })
+            experiences: postCountsMap.get('experience') || 0,
+            services: postCountsMap.get('service') || 0,
+            treks: postCountsMap.get('trek') || 0,
+            plans: postCountsMap.get('plan') || 0
         };
 
         const totalPages = Math.ceil(totalPosts / limitNum);
@@ -370,42 +441,18 @@ export class ProfileService {
         let reviews: any[] = [];
         let reviewStats: any = null;
         if (user.role === 'host') {
-            const currentUserIdStr = currentUserId?.toString();
-            const allHostReviews = await this.reviewModel.find({ host: userId }).populate('reviewer', 'firstname lastname avatar').sort({ createdAt: -1 });
-            reviews = allHostReviews.filter((r: any) => r.comment && r.comment.trim() !== "").slice(0, 10);
-
-            const totalStats = await this.reviewModel.aggregate([
-                { $match: { host: new mongoose.Types.ObjectId(userId) } },
-                { $group: { _id: '$host', average: { $avg: '$rating' }, count: { $sum: 1 } } }
-            ]);
-
-            const writtenCount = allHostReviews.filter((r: any) => r.comment && r.comment.trim() !== "").length;
-            const userRatingObj = currentUserIdStr ? await this.reviewModel.findOne({ host: userId, reviewer: currentUserIdStr, post: null }) : null;
-
-            if (totalStats.length > 0) {
-                const avg = totalStats[0].average || 0;
-                reviewStats = {
-                    totalRatings: totalStats[0].count,
-                    totalReviews: writtenCount,
-                    averageRating: Number(avg.toFixed(1)),
-                    currentUserRating: userRatingObj ? userRatingObj.rating : null,
-                    ratings: {
-                        5: allHostReviews.filter((r: any) => r.rating === 5).length,
-                        4: allHostReviews.filter((r: any) => r.rating === 4).length,
-                        3: allHostReviews.filter((r: any) => r.rating === 3).length,
-                        2: allHostReviews.filter((r: any) => r.rating === 2).length,
-                        1: allHostReviews.filter((r: any) => r.rating === 1).length
-                    }
-                };
-            }
+            const stats = await this.calculateHostReviewStats(userId, currentUserId);
+            reviews = stats.reviews.slice(0, 10);
+            reviewStats = stats.reviewStats;
         }
 
         const currentUserIdStr = currentUserId?.toString();
         const isOwnProfileOrAdmin = !!(currentUserIdStr && (currentUserIdStr === userId || currentUserRole === 'admin'));
         const userData = this.getUserFields(user, isOwnProfileOrAdmin);
 
-        userData.isFriend = currentUserIdStr && (user.friends || []).some((id: any) => id && id.toString() === currentUserIdStr);
-        userData.isRequestedFriend = currentUserIdStr && (user.friendRequests || []).some((id: any) => id && id.toString() === currentUserIdStr);
+        const { isFriend, isRequestedFriend } = this.getFriendshipStatus(user, currentUserIdStr);
+        userData.isFriend = isFriend;
+        userData.isRequestedFriend = isRequestedFriend;
 
         return {
             user: userData,
@@ -448,8 +495,8 @@ export class ProfileService {
         const services = posts.filter((p: any) => p.postType === 'service');
         const treks = posts.filter((p: any) => p.postType === 'trek');
         const plans = posts.filter((p: any) => p.postType === 'plan');
+        const itineraries = plans;
 
-        const itineraries = posts.filter((p: any) => p.postType === 'plan');
         const reviewsWritten = await this.reviewModel.find({ reviewer: userId, comment: { $exists: true, $ne: "" } })
             .populate('host', 'firstname lastname avatar')
             .populate('post', 'title postType')
@@ -458,36 +505,9 @@ export class ProfileService {
         let reviewsReceived: any[] = [];
         let reviewStats: any = null;
         if (user.role === 'host') {
-            const currentUserIdStr = currentUserId?.toString();
-            const allHostReviews = await this.reviewModel.find({ host: userId })
-                .populate('reviewer', 'firstname lastname avatar')
-                .populate('post', 'title postType')
-                .sort({ createdAt: -1 });
-            reviewsReceived = allHostReviews.filter((r: any) => r.comment && r.comment.trim() !== "");
-
-            const totalStats = await this.reviewModel.aggregate([
-                { $match: { host: new mongoose.Types.ObjectId(userId) } },
-                { $group: { _id: '$host', average: { $avg: '$rating' }, count: { $sum: 1 } } }
-            ]);
-
-            const userRatingObj = currentUserIdStr ? await this.reviewModel.findOne({ host: userId, reviewer: currentUserIdStr, post: null }) : null;
-
-            if (totalStats.length > 0) {
-                const avg = totalStats[0].average || 0;
-                reviewStats = {
-                    totalRatings: totalStats[0].count,
-                    totalReviews: reviewsReceived.length,
-                    averageRating: Number(avg.toFixed(1)),
-                    currentUserRating: userRatingObj ? userRatingObj.rating : null,
-                    ratings: {
-                        5: allHostReviews.filter((r: any) => r.rating === 5).length,
-                        4: allHostReviews.filter((r: any) => r.rating === 4).length,
-                        3: allHostReviews.filter((r: any) => r.rating === 3).length,
-                        2: allHostReviews.filter((r: any) => r.rating === 2).length,
-                        1: allHostReviews.filter((r: any) => r.rating === 1).length
-                    }
-                };
-            }
+            const stats = await this.calculateHostReviewStats(userId, currentUserId);
+            reviewsReceived = stats.reviews;
+            reviewStats = stats.reviewStats;
         }
 
         const stats = {
@@ -499,8 +519,10 @@ export class ProfileService {
         const currentUserIdStr = currentUserId?.toString();
         const isOwnProfileOrAdmin = !!(currentUserIdStr && (currentUserIdStr === userId || currentUserRole === 'admin'));
         const userData = this.getUserFields(user, isOwnProfileOrAdmin);
-        userData.isFriend = currentUserIdStr && (user.friends || []).some((id: any) => id && id.toString() === currentUserIdStr);
-        userData.isRequestedFriend = currentUserIdStr && (user.friendRequests || []).some((id: any) => id && id.toString() === currentUserIdStr);
+
+        const { isFriend, isRequestedFriend } = this.getFriendshipStatus(user, currentUserIdStr);
+        userData.isFriend = isFriend;
+        userData.isRequestedFriend = isRequestedFriend;
 
         return {
             user: userData,
@@ -645,9 +667,7 @@ export class ProfileService {
 
             let parsedExisting: any[] = [];
             if (existingAadhaar) {
-                try {
-                    parsedExisting = typeof existingAadhaar === 'string' ? JSON.parse(existingAadhaar) : existingAadhaar;
-                } catch (e) {}
+                parsedExisting = parseIfJson(existingAadhaar) || (Array.isArray(existingAadhaar) ? existingAadhaar : [existingAadhaar]);
             }
             let newAadhaar: any[] = [];
             if (aadhaar) {
@@ -671,8 +691,8 @@ export class ProfileService {
             const hasYearsChanging = isYearsSupplied && parsedYears !== (currentDetails.yearsOfExperience || 0);
             if (hasYearsChanging) isVerifChanging = true;
             if (phone !== undefined && phone.trim() !== '' && phone.trim() !== (currentDetails.phone || '').trim()) {
-                const normPhone = phone.trim().replace(/\s+/g, '');
-                const normTemp = (currentDetails.tempVerifiedPhone || '').trim().replace(/\s+/g, '');
+                const normPhone = normalizePhoneNumber(phone);
+                const normTemp = normalizePhoneNumber(currentDetails.tempVerifiedPhone || '');
                 if (!normTemp || normPhone !== normTemp) {
                     const error: any = new Error("Please verify your updated phone number first using OTP");
                     error.statusCode = 400;
@@ -717,23 +737,12 @@ export class ProfileService {
                 }
 
                 user.pendingHostDetails.yearsOfExperience = hasYearsChanging ? parsedYears : (currentDetails.yearsOfExperience || 0);
-                if (phone !== undefined && phone.trim() !== '') user.pendingHostDetails.phone = phone.trim();
-                else user.pendingHostDetails.phone = currentDetails.phone;
-
-                if (physicalAddress !== undefined && physicalAddress.trim() !== '') user.pendingHostDetails.physicalAddress = physicalAddress.trim();
-                else user.pendingHostDetails.physicalAddress = currentDetails.physicalAddress;
-
-                if (pincode !== undefined && pincode.trim() !== '') user.pendingHostDetails.pincode = pincode.trim();
-                else user.pendingHostDetails.pincode = currentDetails.pincode;
-
-                if (city !== undefined && city.trim() !== '') user.pendingHostDetails.city = city.trim();
-                else user.pendingHostDetails.city = currentDetails.city;
-
-                if (district !== undefined && district.trim() !== '') user.pendingHostDetails.district = district.trim();
-                else user.pendingHostDetails.district = currentDetails.district;
-
-                if (state !== undefined && state.trim() !== '') user.pendingHostDetails.state = state.trim();
-                else user.pendingHostDetails.state = currentDetails.state;
+                user.pendingHostDetails.phone = phone !== undefined && phone.trim() !== '' ? phone.trim() : currentDetails.phone;
+                user.pendingHostDetails.physicalAddress = physicalAddress !== undefined && physicalAddress.trim() !== '' ? physicalAddress.trim() : currentDetails.physicalAddress;
+                user.pendingHostDetails.pincode = pincode !== undefined && pincode.trim() !== '' ? pincode.trim() : currentDetails.pincode;
+                user.pendingHostDetails.city = city !== undefined && city.trim() !== '' ? city.trim() : currentDetails.city;
+                user.pendingHostDetails.district = district !== undefined && district.trim() !== '' ? district.trim() : currentDetails.district;
+                user.pendingHostDetails.state = state !== undefined && state.trim() !== '' ? state.trim() : currentDetails.state;
 
                 if (proposedAadhaar.length > 0) {
                     user.pendingHostDetails.aadhaarCard = proposedAadhaar;
@@ -746,28 +755,16 @@ export class ProfileService {
                 }
 
                 if (interests !== undefined) {
-                    try {
-                        user.interests = typeof interests === 'string' ? JSON.parse(interests) : interests;
-                    } catch (e) {
-                        user.interests = Array.isArray(interests) ? interests : [];
-                    }
+                    user.interests = this.parseInterests(interests);
                 }
 
                 await user.save();
 
-                // Send email notification to admin
+                // Send email notification to admin using renderDocumentListHtml
                 const adminEmail = process.env.ADMIN_EMAIL || "teamsathithya@gmail.com";
                 const adminSubject = `Host Profile Update Review Request - Athithya`;
                 const hostname = `${user.firstname} ${user.lastname}`;
-
-                let docListHtml = "None";
-                if (user.pendingHostDetails.aadhaarCard && user.pendingHostDetails.aadhaarCard.length > 0) {
-                    docListHtml = user.pendingHostDetails.aadhaarCard.map((doc: any, idx: number) => `
-                        <div style="margin-bottom: 10px;">
-                            <strong>Document ${idx + 1}:</strong> <a href="${doc.url}" target="_blank" style="color: #C59A2F; text-decoration: none; font-weight: bold;">View / Download</a>
-                        </div>
-                    `).join("");
-                }
+                const docListHtml = renderDocumentListHtml(user.pendingHostDetails.aadhaarCard);
 
                 this.emailNotifier({
                     to: adminEmail,
@@ -846,15 +843,7 @@ export class ProfileService {
         }
 
         if (interests !== undefined) {
-            try {
-                user.interests = typeof interests === 'string' ? JSON.parse(interests) : interests;
-            } catch (e) {
-                if (typeof interests === 'string') {
-                    user.interests = interests.split(',').map((i: string) => i.trim()).filter(Boolean);
-                } else {
-                    user.interests = interests;
-                }
-            }
+            user.interests = this.parseInterests(interests);
         }
 
         await user.save();

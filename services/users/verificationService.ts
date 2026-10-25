@@ -1,14 +1,10 @@
-const { User, OTP, Notification } = require("../../db/mongoose");
-const { parseIfJson } = require("../posts/postPayloadParser");
-const brevo = require("@getbrevo/brevo");
-const { generateOTP, sendTemplateEmail } = require("../emailService");
+import { User, Notification } from "../../db/mongoose";
+import { parseIfJson } from "../posts/postPayloadParser";
+import { sendTemplateEmail } from "../emailService";
 import { notificationService } from "../notificationService";
+import { otpService as defaultOtpService, OtpService, normalizePhoneNumber } from "../otpService";
 
-// Initialize Brevo transactional SMS API client
-const defaultSmsApiInstance = new brevo.TransactionalSMSApi();
-if (defaultSmsApiInstance.authentications && defaultSmsApiInstance.authentications['apiKey']) {
-    defaultSmsApiInstance.authentications['apiKey'].apiKey = process.env.BREVO_API_KEY;
-}
+export { normalizePhoneNumber };
 
 export interface HostVerificationData {
     phone: string;
@@ -22,35 +18,45 @@ export interface HostVerificationData {
     aadhaarCardData?: any[];
 }
 
+/**
+ * Reusable helper: Render document download HTML links for admin notification emails
+ */
+export function renderDocumentListHtml(documents: any[]): string {
+    if (!documents || documents.length === 0) return "None";
+    return documents.map((doc: any, idx: number) => {
+        const url = doc.url || doc.fileUrl || '';
+        if (!url) return '';
+        return `
+            <div style="margin-bottom: 10px;">
+                <strong>Document ${idx + 1}:</strong> <a href="${url}" target="_blank" style="color: #C59A2F; text-decoration: none; font-weight: bold;">View / Download</a>
+            </div>
+        `;
+    }).filter(Boolean).join("");
+}
+
 export class VerificationService {
     private static instance: VerificationService | null = null;
     private static instanceKey = Symbol("VerificationServiceInstanceKey");
 
     private userModel: any;
-    private otpModel: any;
     private notificationModel: any;
-    private smsClient: any;
-    private otpGenerator: () => string;
     private emailNotifier: (options: any) => Promise<any>;
+    private otpService: OtpService;
 
     constructor(
         instanceKey: symbol,
         userModel: any = User,
-        otpModel: any = OTP,
         notificationModel: any = Notification,
-        smsClient: any = defaultSmsApiInstance,
-        otpGenerator: () => string = generateOTP,
-        emailNotifier: (options: any) => Promise<any> = sendTemplateEmail
+        emailNotifier: (options: any) => Promise<any> = sendTemplateEmail,
+        otpServiceInstance: OtpService = defaultOtpService
     ) {
         if (instanceKey !== VerificationService.instanceKey) {
             throw new Error("Please use VerificationService.getInstance() to retrieve or create an instance");
         }
         this.userModel = userModel;
-        this.otpModel = otpModel;
         this.notificationModel = notificationModel;
-        this.smsClient = smsClient;
-        this.otpGenerator = otpGenerator;
         this.emailNotifier = emailNotifier;
+        this.otpService = otpServiceInstance;
     }
 
     public static getInstance(
@@ -59,137 +65,65 @@ export class VerificationService {
         notificationModel?: any,
         smsClient?: any,
         otpGenerator?: () => string,
-        emailNotifier?: (options: any) => Promise<any>
+        emailNotifier?: (options: any) => Promise<any>,
+        otpServiceInstance?: OtpService
     ): VerificationService {
         if (!this.instance) {
+            const resolvedOtpService = otpServiceInstance ||
+                (otpModel || smsClient ? OtpService.getInstance({ otpModel, smsClient }) : defaultOtpService);
             this.instance = new VerificationService(
                 this.instanceKey,
                 userModel,
-                otpModel,
                 notificationModel,
-                smsClient,
-                otpGenerator,
-                emailNotifier
+                emailNotifier,
+                resolvedOtpService
             );
         }
         return this.instance;
     }
 
-    /**
-     * Helper: Normalize phone number with country code (+91 default for India)
-     */
     public normalizePhoneNumber(phone: string): string {
-        if (!phone) return "";
-        let normalized = phone.trim().replace(/\s+/g, '');
-        if (!normalized.startsWith('+')) {
-            if (normalized.length === 10) {
-                normalized = '+91' + normalized;
-            }
-        }
-        return normalized;
+        return normalizePhoneNumber(phone);
     }
 
     /**
-     * Service: Send phone verification OTP via Brevo SMS
+     * Check if a phone number is already verified by another host
      */
-    public async sendPhoneOTP(phone: string, userId?: string): Promise<{ phone: string }> {
-        if (!phone) {
-            const error: any = new Error("Phone number is required");
-            error.statusCode = 400;
-            throw error;
-        }
-
-        const normalizedPhone = this.normalizePhoneNumber(phone);
-        if (!normalizedPhone.startsWith('+')) {
-            const error: any = new Error("Please include your country code (e.g. +91)");
-            error.statusCode = 400;
-            throw error;
-        }
-
-        // Check if phone number is already registered and verified by another user
-        const existingHostWithPhone = await this.userModel.findOne({
+    public async checkPhoneAvailable(normalizedPhone: string, excludeUserId?: string): Promise<void> {
+        const existingHost = await this.userModel.findOne({
             "hostDetails.phone": normalizedPhone,
             "hostDetails.phoneVerified": true,
-            _id: { $ne: userId }
+            _id: { $ne: excludeUserId }
         });
 
-        if (existingHostWithPhone) {
+        if (existingHost) {
             const error: any = new Error("This phone number has already been used, please try another number");
             error.statusCode = 400;
             throw error;
         }
-
-        // Generate OTP
-        const otp = this.otpGenerator();
-
-        // Store OTP in database
-        await this.otpModel.findOneAndUpdate(
-            { phone: normalizedPhone },
-            { phone: normalizedPhone, otp },
-            { upsert: true, new: true }
-        );
-
-        // Send OTP via Brevo Transactional SMS
-        const sendTransacSms = new brevo.SendTransacSms();
-        sendTransacSms.sender = "Athithya";
-        sendTransacSms.recipient = normalizedPhone;
-        sendTransacSms.content = `Your Athithya verification code is ${otp}. It will expire in 5 minutes.`;
-
-        console.log(`\n========================================`);
-        console.log(`[SMS OTP] Phone: ${normalizedPhone}, OTP: ${otp}`);
-        console.log(`========================================\n`);
-
-        try {
-            await this.smsClient.sendTransacSms(sendTransacSms);
-        } catch (smsError: any) {
-            const errorMsg = smsError.response?.body?.message || smsError.message || 'Unknown Brevo SMS error';
-            console.error('Brevo SMS sending error:', errorMsg);
-            const error: any = new Error(`Failed to send OTP SMS. Details: ${errorMsg}`);
-            error.statusCode = 500;
-            throw error;
-        }
-
-        return { phone: normalizedPhone };
     }
 
     /**
-     * Service: Verify phone OTP code
+     * Service: Request phone verification for host application
      */
-    public async verifyPhoneOTP(phone: string, otp: string, userId: string): Promise<boolean> {
-        if (!phone || !otp) {
-            const error: any = new Error("Phone number and OTP code are required");
-            error.statusCode = 400;
-            throw error;
-        }
+    public async requestPhoneVerification(phone: string, userId?: string): Promise<{ phone: string }> {
+        const normalizedPhone = this.otpService.normalizePhoneNumber(phone);
+        await this.checkPhoneAvailable(normalizedPhone, userId);
+        const { phone: sentPhone } = await this.otpService.sendPhoneOTP(normalizedPhone);
+        return { phone: sentPhone };
+    }
 
-        const normalizedPhone = this.normalizePhoneNumber(phone);
-        if (!normalizedPhone.startsWith('+')) {
-            const error: any = new Error("Invalid phone number format");
-            error.statusCode = 400;
-            throw error;
-        }
+    /**
+     * Service: Verify phone OTP and link verified phone to user's host profile
+     */
+    public async verifyAndLinkPhone(phone: string, otp: string, userId: string): Promise<boolean> {
+        // 1. Verify and consume OTP via OtpService (handles validation, normalization, expiry, and replay prevention)
+        await this.otpService.verifyPhoneOTP(phone, otp);
 
-        // Find OTP record
-        const otpRecord = await this.otpModel.findOne({ phone: normalizedPhone, otp });
-        if (!otpRecord) {
-            const error: any = new Error("Invalid or expired OTP");
-            error.statusCode = 400;
-            throw error;
-        }
+        const normalizedPhone = this.otpService.normalizePhoneNumber(phone);
+        await this.checkPhoneAvailable(normalizedPhone, userId);
 
-        // Check if phone number is already registered and verified by another user
-        const existingHostWithPhone = await this.userModel.findOne({
-            "hostDetails.phone": normalizedPhone,
-            "hostDetails.phoneVerified": true,
-            _id: { $ne: userId }
-        });
-
-        if (existingHostWithPhone) {
-            const error: any = new Error("This phone number has already been used, please try another number");
-            error.statusCode = 400;
-            throw error;
-        }
-
+        // 2. Domain logic: Update host profile with verified phone
         const user = await this.userModel.findById(userId);
         if (!user) {
             const error: any = new Error("User not found");
@@ -208,9 +142,16 @@ export class VerificationService {
             user.hostDetails.phoneVerified = true;
         }
         await user.save();
-
-        await this.otpModel.deleteOne({ _id: otpRecord._id });
         return true;
+    }
+
+    // Convenience aliases for backward compatibility with existing callers
+    public async sendPhoneOTP(phone: string, userId?: string): Promise<{ phone: string }> {
+        return this.requestPhoneVerification(phone, userId);
+    }
+
+    public async verifyPhoneOTP(phone: string, otp: string, userId: string): Promise<boolean> {
+        return this.verifyAndLinkPhone(phone, otp, userId);
     }
 
     /**
@@ -229,7 +170,6 @@ export class VerificationService {
         }
 
         const normalizedPhone = this.normalizePhoneNumber(phone);
-
         const user = await this.userModel.findById(userId);
         if (!user) {
             const error: any = new Error("User not found");
@@ -279,23 +219,14 @@ export class VerificationService {
 
         user.role = 'host';
         user.hostStatus = 'pending_approval';
-        user.pendingHostDetails = undefined;
+        user.set('pendingHostDetails', undefined);
         await user.save();
-        await this.userModel.updateOne({ _id: userId }, { $unset: { pendingHostDetails: 1 } });
 
         // Notify Admin via email
         const adminEmail = process.env.ADMIN_EMAIL || "teamsathithya@gmail.com";
         const hostname = `${user.firstname} ${user.lastname}`;
         const adminSubject = `Host Verification Request - Athithya`;
-
-        let docListHtml = "None";
-        if (aadhaarCardData && aadhaarCardData.length > 0) {
-            docListHtml = aadhaarCardData.map((doc: any, idx: number) => `
-                <div style="margin-bottom: 10px;">
-                    <strong>Document ${idx + 1}:</strong> <a href="${doc.url}" target="_blank" style="color: #C59A2F; text-decoration: none; font-weight: bold;">View / Download</a>
-                </div>
-            `).join("");
-        }
+        const docListHtml = renderDocumentListHtml(aadhaarCardData);
 
         this.emailNotifier({
             to: adminEmail,

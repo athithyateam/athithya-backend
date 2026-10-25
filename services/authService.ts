@@ -1,8 +1,9 @@
 import bcrypt from "bcryptjs";
 import axios from "axios";
 import jwt from "jsonwebtoken";
-import { User, OTP, Conversation, Message } from "../db/mongoose";
-import { generateOTP, sendOTPEmail, sendTemplateEmail, sendHtmlEmail, renderBrandedEmail } from "./emailService";
+import { User, Conversation, Message } from "../db/mongoose";
+import { sendTemplateEmail, sendHtmlEmail, renderBrandedEmail } from "./emailService";
+import { otpService as defaultOtpService, OtpService } from "./otpService";
 import { notificationService } from "./notificationService";
 
 const defaultJwtSecret = process.env.JWT_SECRET || "";
@@ -34,8 +35,8 @@ export interface AuthResponse {
 }
 
 export interface EmailNotifier {
-    generateOTP: (length?: number) => string;
-    sendOTPEmail: (email: string, otp: string, subject?: string, title?: string) => Promise<any>;
+    generateOTP?: (length?: number) => string;
+    sendOTPEmail?: (email: string, otp: string, subject?: string, title?: string) => Promise<any>;
     sendTemplateEmail: (options: {
         to: string;
         subject: string;
@@ -50,6 +51,7 @@ export interface EmailNotifier {
 
 export interface AuthDependencies {
     userModel?: any;
+    otpService?: OtpService;
     otpModel?: any;
     conversationModel?: any;
     messageModel?: any;
@@ -64,7 +66,7 @@ export default class AuthService {
     private static instanceKey = Symbol("AuthServiceInstanceKey");
 
     private userModel: any;
-    private otpModel: any;
+    private otpService: OtpService;
     private conversationModel: any;
     private messageModel: any;
     private jwtSigner: typeof jwt;
@@ -78,14 +80,12 @@ export default class AuthService {
         }
 
         this.userModel = deps.userModel || User;
-        this.otpModel = deps.otpModel || OTP;
+        this.otpService = deps.otpService || (deps.otpModel ? OtpService.getInstance({ otpModel: deps.otpModel }) : defaultOtpService);
         this.conversationModel = deps.conversationModel || Conversation;
         this.messageModel = deps.messageModel || Message;
         this.jwtSigner = deps.jwtSigner || jwt;
         this.jwtSecret = deps.jwtSecret || defaultJwtSecret;
         this.emailNotifier = deps.emailNotifier || {
-            generateOTP,
-            sendOTPEmail,
             sendTemplateEmail,
             sendHtmlEmail,
             renderBrandedEmail
@@ -141,17 +141,11 @@ export default class AuthService {
     }
 
     public async generateAndSendOTP(email: string, subject?: string, title?: string): Promise<string> {
-        const otp = this.emailNotifier.generateOTP();
-        await this.otpModel.findOneAndUpdate({ email }, { email, otp }, { upsert: true, new: true });
-        const emailResult = await this.emailNotifier.sendOTPEmail(email, otp, subject, title);
-        if (!emailResult?.success) httpError(500, "Failed to send OTP email");
-        return otp;
+        return this.otpService.sendEmailOTP(email, { subject, title });
     }
 
     public async verifyAndConsumeOTP(email: string, otp: string): Promise<void> {
-        const otpRecord = await this.otpModel.findOne({ email, otp });
-        if (!otpRecord) httpError(400, "Invalid or expired OTP");
-        await this.otpModel.deleteOne({ email, otp });
+        await this.otpService.verifyEmailOTP(email, otp);
     }
 
     public notifyAdminNewUserSignup(user: any, source: string = ""): void {

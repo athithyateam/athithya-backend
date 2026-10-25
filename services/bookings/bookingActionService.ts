@@ -1,5 +1,6 @@
 import { Booking, User } from "../../db/mongoose";
-import { sendHtmlEmail, generateOTP, sendOTPEmail, renderBrandedEmail } from "../emailService";
+import { sendHtmlEmail, renderBrandedEmail } from "../emailService";
+import { otpService } from "../otpService";
 import { notificationService } from "../notificationService";
 
 export interface PaginationQuery {
@@ -261,24 +262,25 @@ export class BookingActionService {
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
         if (booking.status !== "accepted") { const err: any = new Error("Booking must be accepted to start the journey"); err.statusCode = 400; throw err; }
 
-        const otp = generateOTP();
+        const { otp, expiresAt } = await otpService.sendBookingJourneyOTP({
+            email: booking.guest?.email,
+            postTitle: booking.postTitle,
+            type: "check-in"
+        });
         booking.startOTP = otp;
-        booking.startOTPExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+        booking.startOTPExpiresAt = expiresAt;
         await booking.save();
 
-        await sendOTPEmail(booking.guest?.email, otp, "Athithya - Your Check-in OTP", `Check-in OTP for "${booking.postTitle}"`);
         return { success: true, message: "Check-in OTP sent successfully to guest's email" };
     }
 
     public async verifyStartOTP(bookingId: string, hostId: string, otp: string): Promise<any> {
-        if (!otp) { const err: any = new Error("OTP code is required"); err.statusCode = 400; throw err; }
-
         const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("host", "firstname lastname email");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host._id.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
         if (booking.status !== "accepted") { const err: any = new Error("Booking must be accepted to verify check-in"); err.statusCode = 400; throw err; }
-        if (!booking.startOTP || booking.startOTP !== otp.trim()) { const err: any = new Error("Invalid OTP code"); err.statusCode = 400; throw err; }
-        if (new Date() > new Date(booking.startOTPExpiresAt)) { const err: any = new Error("OTP has expired. Please request a new one."); err.statusCode = 400; throw err; }
+
+        otpService.verifyTimedOTP(booking.startOTP, booking.startOTPExpiresAt, otp);
 
         booking.status = "in_progress";
         booking.journeyStartedAt = new Date();
@@ -309,24 +311,25 @@ export class BookingActionService {
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
         if (booking.status !== "in_progress") { const err: any = new Error("Journey must be active (in progress) to complete it"); err.statusCode = 400; throw err; }
 
-        const otp = generateOTP();
+        const { otp, expiresAt } = await otpService.sendBookingJourneyOTP({
+            email: booking.guest?.email,
+            postTitle: booking.postTitle,
+            type: "checkout"
+        });
         booking.completionOTP = otp;
-        booking.completionOTPExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+        booking.completionOTPExpiresAt = expiresAt;
         await booking.save();
 
-        await sendOTPEmail(booking.guest?.email, otp, "Athithya - Your Checkout OTP", `Journey Completion OTP for "${booking.postTitle}"`);
         return { success: true, message: "Checkout OTP sent successfully to guest's email" };
     }
 
     public async verifyCompletionOTP(bookingId: string, hostId: string, otp: string): Promise<any> {
-        if (!otp) { const err: any = new Error("OTP code is required"); err.statusCode = 400; throw err; }
-
         const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("host", "firstname lastname email");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host._id.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
         if (booking.status !== "in_progress") { const err: any = new Error("Journey must be active to verify checkout"); err.statusCode = 400; throw err; }
-        if (!booking.completionOTP || booking.completionOTP !== otp.trim()) { const err: any = new Error("Invalid OTP code"); err.statusCode = 400; throw err; }
-        if (new Date() > new Date(booking.completionOTPExpiresAt)) { const err: any = new Error("OTP has expired. Please request a new one."); err.statusCode = 400; throw err; }
+
+        otpService.verifyTimedOTP(booking.completionOTP, booking.completionOTPExpiresAt, otp);
 
         booking.status = "completed";
         booking.journeyCompletedAt = new Date();
