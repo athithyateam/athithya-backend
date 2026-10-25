@@ -5,6 +5,7 @@ import { User, Conversation, Message } from "../db/mongoose";
 import { sendTemplateEmail, sendHtmlEmail, renderBrandedEmail } from "./emailService";
 import { otpService as defaultOtpService, OtpService } from "./otpService";
 import { notificationService } from "./notificationService";
+import { chatService } from "./chatService";
 
 const defaultJwtSecret = process.env.JWT_SECRET || "";
 if (!defaultJwtSecret && process.env.NODE_ENV === "production") {
@@ -206,49 +207,7 @@ export default class AuthService {
 
     public async sendWelcomeChatMessage(user: any, adminUser?: any): Promise<any> {
         const admin = adminUser || (await this.getOrCreateOfficialAdmin());
-        const isHost = user.role === "host";
-        const roleText = isHost ? "host" : "guest";
-        const firstName = user.firstname || (isHost ? "Host" : "Guest");
-        const welcomeChatText = `Dear ${roleText} ${firstName}, Welcome to Athithya! Thank you for creating an account as a ${roleText} in Athithya! If you have any queries, feel free to share them with us.`;
-
-        let conversation = await this.conversationModel.findOne({
-            participants: { $all: [admin._id, user._id], $size: 2 }
-        });
-
-        if (!conversation) {
-            const unreadMap = new Map();
-            unreadMap.set(admin._id.toString(), 0);
-            unreadMap.set(user._id.toString(), 1);
-
-            conversation = await this.conversationModel.create({
-                participants: [admin._id, user._id],
-                unreadCounts: unreadMap
-            });
-        }
-
-        const message = await this.messageModel.create({
-            conversationId: conversation._id,
-            sender: admin._id,
-            recipient: user._id,
-            text: welcomeChatText,
-            messageType: "text"
-        });
-
-        const targetUserId = user._id.toString();
-        await this.conversationModel.findByIdAndUpdate(conversation._id, {
-            $set: {
-                lastMessage: {
-                    text: welcomeChatText,
-                    sender: admin._id,
-                    createdAt: new Date()
-                },
-                [`unreadCounts.${targetUserId}`]: 1
-            }
-        });
-
-        const populatedMsg = await this.messageModel.findById(message._id).populate("sender", "firstname lastname avatar");
-        notificationService.emitToUser(targetUserId, "new_message", populatedMsg);
-        return message;
+        return chatService.sendWelcomeChatMessage(user, admin);
     }
 
     public async sendWelcomeEmail(user: any): Promise<void> {

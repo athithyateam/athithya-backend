@@ -4,7 +4,7 @@ import { createRazorpayOrder, verifyRazorpaySignature, fetchPaymentDetails } fro
 import { sendHtmlEmail, renderBrandedEmail } from "../emailService";
 import { notificationService } from "../notificationService";
 import { getPlatformFeeRate } from "../posts/postPayloadParser";
-const { triggerHostBookingWelcome } = require("../../utils/hostBookingChatHelper");
+import { chatService } from "../chatService";
 
 export interface CreateBookingInput {
     postId: string;
@@ -322,7 +322,7 @@ export class BookingCreationService {
             } catch (hErr) { console.error("Host badge update error:", hErr); }
         }
 
-        try { triggerHostBookingWelcome({}, booking).catch(() => {}); } catch (dmErr) {}
+        try { chatService.sendHostBookingWelcome(booking).catch(() => {}); } catch (dmErr) {}
 
         try {
             const guestUser = await User.findById(guestId, "firstname lastname email");
