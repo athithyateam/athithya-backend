@@ -1,6 +1,6 @@
 import { Booking, User } from "../../db/mongoose";
-import { sendHtmlEmail, generateOTP, sendOTPEmail } from "../emailService";
-import { dispatchNotification, renderBrandedEmail } from "./bookingCreationService";
+import { sendHtmlEmail, generateOTP, sendOTPEmail, renderBrandedEmail } from "../emailService";
+import { notificationService } from "../notificationService";
 
 export interface PaginationQuery {
     status?: string;
@@ -137,7 +137,7 @@ export class BookingActionService {
         return result;
     }
 
-    public async acceptBooking(bookingId: string, hostId: string, hostResponse: string = "", io?: any): Promise<any> {
+    public async acceptBooking(bookingId: string, hostId: string, hostResponse: string = ""): Promise<any> {
         const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("post", "title");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
@@ -148,7 +148,7 @@ export class BookingActionService {
         booking.respondedAt = new Date();
         await booking.save();
 
-        await dispatchNotification(io, {
+        await notificationService.sendNotification({
             recipient: booking.guest._id,
             sender: hostId,
             title: "Booking Accepted",
@@ -175,7 +175,7 @@ export class BookingActionService {
         return result;
     }
 
-    public async declineBooking(bookingId: string, hostId: string, hostResponse: string = "", io?: any): Promise<any> {
+    public async declineBooking(bookingId: string, hostId: string, hostResponse: string = ""): Promise<any> {
         const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("post", "title");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
@@ -186,7 +186,7 @@ export class BookingActionService {
         booking.respondedAt = new Date();
         await booking.save();
 
-        await dispatchNotification(io, {
+        await notificationService.sendNotification({
             recipient: booking.guest._id,
             sender: hostId,
             title: "Booking Declined",
@@ -213,7 +213,7 @@ export class BookingActionService {
         return result;
     }
 
-    public async requestCancellation(bookingId: string, guestId: string, reason: string = "No reason provided", io?: any): Promise<any> {
+    public async requestCancellation(bookingId: string, guestId: string, reason: string = "No reason provided"): Promise<any> {
         const booking: any = await Booking.findById(bookingId);
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.guest.toString() !== guestId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
@@ -222,7 +222,7 @@ export class BookingActionService {
         booking.cancellationReason = reason || "No reason provided";
         await booking.save();
 
-        await dispatchNotification(io, {
+        await notificationService.sendNotification({
             recipient: booking.host,
             sender: guestId,
             title: "Cancellation Requested",
@@ -234,7 +234,7 @@ export class BookingActionService {
         return booking;
     }
 
-    public async approveCancellation(bookingId: string, hostId: string, io?: any): Promise<any> {
+    public async approveCancellation(bookingId: string, hostId: string): Promise<any> {
         const booking: any = await Booking.findById(bookingId);
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
@@ -243,7 +243,7 @@ export class BookingActionService {
         booking.paymentStatus = "refund_pending";
         await booking.save();
 
-        await dispatchNotification(io, {
+        await notificationService.sendNotification({
             recipient: booking.guest,
             sender: hostId,
             title: "Cancellation Approved",
@@ -270,7 +270,7 @@ export class BookingActionService {
         return { success: true, message: "Check-in OTP sent successfully to guest's email" };
     }
 
-    public async verifyStartOTP(bookingId: string, hostId: string, otp: string, io?: any): Promise<any> {
+    public async verifyStartOTP(bookingId: string, hostId: string, otp: string): Promise<any> {
         if (!otp) { const err: any = new Error("OTP code is required"); err.statusCode = 400; throw err; }
 
         const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("host", "firstname lastname email");
@@ -290,7 +290,7 @@ export class BookingActionService {
         const adminHtml = renderBrandedEmail("Journey Started Successfully", `<p><strong>${booking.guest?.firstname} ${booking.guest?.lastname}</strong> has checked in for <strong>"${booking.postTitle}"</strong> with host <strong>${booking.host?.firstname}</strong>.</p>`, "Journey Alert");
         sendHtmlEmail(adminEmail, `Journey Started - Booking #${bookingId}`, adminHtml).catch(() => {});
 
-        await dispatchNotification(io, {
+        await notificationService.sendNotification({
             recipient: booking.guest._id,
             sender: hostId,
             title: "Check-in Confirmed",
@@ -299,7 +299,7 @@ export class BookingActionService {
             link: `/bookings/${booking._id}`
         });
 
-        if (io) io.emit("journey_status_updated", { bookingId: booking._id, status: "in_progress" });
+        notificationService.emitToAll("journey_status_updated", { bookingId: booking._id, status: "in_progress" });
         return booking;
     }
 
@@ -318,7 +318,7 @@ export class BookingActionService {
         return { success: true, message: "Checkout OTP sent successfully to guest's email" };
     }
 
-    public async verifyCompletionOTP(bookingId: string, hostId: string, otp: string, io?: any): Promise<any> {
+    public async verifyCompletionOTP(bookingId: string, hostId: string, otp: string): Promise<any> {
         if (!otp) { const err: any = new Error("OTP code is required"); err.statusCode = 400; throw err; }
 
         const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("host", "firstname lastname email");
@@ -335,11 +335,11 @@ export class BookingActionService {
         await booking.save();
 
         try {
-            if (io && booking.guest && booking.host) {
+            if (booking.guest && booking.host) {
                 const gStr = (booking.guest._id || booking.guest).toString();
                 const hStr = (booking.host._id || booking.host).toString();
-                io.to(gStr).emit("chat_eligibility_updated", { canChat: true, isGuest: true, hostId: hStr });
-                io.to(hStr).emit("chat_eligibility_updated", { canChat: true, isGuest: false });
+                notificationService.emitToUser(gStr, "chat_eligibility_updated", { canChat: true, isGuest: true, hostId: hStr });
+                notificationService.emitToUser(hStr, "chat_eligibility_updated", { canChat: true, isGuest: false });
             }
         } catch (sErr) {}
 
@@ -347,7 +347,7 @@ export class BookingActionService {
         const adminHtml = renderBrandedEmail("Journey Completed Successfully", `<p><strong>${booking.guest?.firstname}</strong> completed experience <strong>"${booking.postTitle}"</strong> with host <strong>${booking.host?.firstname}</strong>.</p>`, "Journey Alert");
         sendHtmlEmail(adminEmail, `Journey Completed - Booking #${bookingId}`, adminHtml).catch(() => {});
 
-        await dispatchNotification(io, {
+        await notificationService.sendNotification({
             recipient: booking.guest._id,
             sender: hostId,
             title: "Journey Completed! Share your experience",
@@ -366,11 +366,11 @@ export class BookingActionService {
             sendHtmlEmail(booking.guest.email, "Thank you for choosing Athithya - Share your experience", guestHtml).catch(() => {});
         }
 
-        if (io) io.emit("journey_status_updated", { bookingId: booking._id, status: "completed" });
+        notificationService.emitToAll("journey_status_updated", { bookingId: booking._id, status: "completed" });
         return booking;
     }
 
-    public async acceptOrphanedBooking(bookingId: string, hostId: string, io?: any): Promise<any> {
+    public async acceptOrphanedBooking(bookingId: string, hostId: string): Promise<any> {
         const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("post", "title");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
@@ -379,7 +379,7 @@ export class BookingActionService {
         await booking.save();
         const experienceTitle = booking.postTitle || booking.post?.title || "experience";
 
-        await dispatchNotification(io, {
+        await notificationService.sendNotification({
             recipient: booking.guest._id,
             sender: hostId,
             title: "Booking Confirmed!",
@@ -399,7 +399,7 @@ export class BookingActionService {
         return result;
     }
 
-    public async rejectOrphanedBooking(bookingId: string, hostId: string, io?: any): Promise<any> {
+    public async rejectOrphanedBooking(bookingId: string, hostId: string): Promise<any> {
         const booking: any = await Booking.findById(bookingId).populate("guest").populate("post", "title");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
@@ -418,7 +418,7 @@ export class BookingActionService {
         const guestName = guestUser ? `${guestUser.firstname} ${guestUser.lastname}` : "Traveler";
         const experienceTitle = booking.postTitle || booking.post?.title || "experience";
 
-        await dispatchNotification(io, {
+        await notificationService.sendNotification({
             recipient: booking.guest._id,
             sender: hostId,
             title: "Booking Declined",

@@ -7,12 +7,10 @@ exports.sendFriendRequest = async (req, res) => {
     try {
         const targetUserId = req.params.id;
         const currentUserId = req.user.userId;
-        const io = req.app.get("io");
 
         await socialService.sendFriendRequest(
             targetUserId,
-            currentUserId,
-            io
+            currentUserId
         );
 
         return res.status(200).json({ success: true, message: "Friend request sent" });
@@ -32,12 +30,10 @@ exports.acceptFriendRequest = async (req, res) => {
     try {
         const requesterId = req.params.id;
         const currentUserId = req.user.userId;
-        const io = req.app.get("io");
 
         await socialService.acceptFriendRequest(
             requesterId,
-            currentUserId,
-            io
+            currentUserId
         );
 
         return res.status(200).json({ success: true, message: "Friend request accepted" });
@@ -57,12 +53,10 @@ exports.rejectFriendRequest = async (req, res) => {
     try {
         const requesterId = req.params.id;
         const currentUserId = req.user.userId;
-        const io = req.app.get("io");
 
         await socialService.rejectFriendRequest(
             requesterId,
-            currentUserId,
-            io
+            currentUserId
         );
 
         return res.status(200).json({ success: true, message: "Friend request rejected" });
@@ -82,12 +76,10 @@ exports.unfriend = async (req, res) => {
     try {
         const targetUserId = req.params.id;
         const currentUserId = req.user.userId;
-        const io = req.app.get("io");
 
         await socialService.unfriend(
             targetUserId,
-            currentUserId,
-            io
+            currentUserId
         );
 
         return res.status(200).json({ success: true, message: "Unfriended and chat cleared" });

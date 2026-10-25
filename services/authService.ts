@@ -2,11 +2,18 @@ import bcrypt from "bcryptjs";
 import axios from "axios";
 import jwt from "jsonwebtoken";
 import { User, OTP, Conversation, Message } from "../db/mongoose";
-import { generateOTP, sendOTPEmail, sendTemplateEmail, sendHtmlEmail } from "./emailService";
+import { generateOTP, sendOTPEmail, sendTemplateEmail, sendHtmlEmail, renderBrandedEmail } from "./emailService";
+import { notificationService } from "./notificationService";
 
 const defaultJwtSecret = process.env.JWT_SECRET || "";
 if (!defaultJwtSecret && process.env.NODE_ENV === "production") {
     throw new Error("JWT_SECRET environment variable is required but not set.");
+}
+
+function httpError(statusCode: number, message: string): never {
+    const error: any = new Error(message);
+    error.statusCode = statusCode;
+    throw error;
 }
 
 export interface FormattedAuthUser {
@@ -38,6 +45,7 @@ export interface EmailNotifier {
         senderEmail?: string;
     }) => Promise<any>;
     sendHtmlEmail?: (email: string, subject: string, htmlContent: string) => Promise<any>;
+    renderBrandedEmail?: (title: string, bodyHtml: string, subtitle?: string) => string;
 }
 
 export interface AuthDependencies {
@@ -48,7 +56,7 @@ export interface AuthDependencies {
     jwtSigner?: typeof jwt;
     jwtSecret?: string;
     emailNotifier?: EmailNotifier;
-    welcomeNotifier?: (reqOrIo: any, user: any) => Promise<void>;
+    welcomeNotifier?: (user: any) => Promise<void>;
 }
 
 export default class AuthService {
@@ -62,7 +70,7 @@ export default class AuthService {
     private jwtSigner: typeof jwt;
     private jwtSecret: string;
     private emailNotifier: EmailNotifier;
-    private welcomeNotifier?: (reqOrIo: any, user: any) => Promise<void>;
+    private welcomeNotifier?: (user: any) => Promise<void>;
 
     constructor(instanceKey: symbol, deps: AuthDependencies = {}) {
         if (instanceKey !== AuthService.instanceKey) {
@@ -79,37 +87,34 @@ export default class AuthService {
             generateOTP,
             sendOTPEmail,
             sendTemplateEmail,
-            sendHtmlEmail
+            sendHtmlEmail,
+            renderBrandedEmail
         };
         this.welcomeNotifier = deps.welcomeNotifier;
 
-        this.generateAuthToken = this.generateAuthToken.bind(this);
-        this.verifyToken = this.verifyToken.bind(this);
-        this.triggerNewUserWelcome = this.triggerNewUserWelcome.bind(this);
-        this.formatAuthUser = this.formatAuthUser.bind(this);
-        this.notifyAdminNewUserSignup = this.notifyAdminNewUserSignup.bind(this);
-        this.initiateSignup = this.initiateSignup.bind(this);
-        this.completeSignup = this.completeSignup.bind(this);
-        this.signin = this.signin.bind(this);
-        this.googleSignin = this.googleSignin.bind(this);
-        this.forgotPassword = this.forgotPassword.bind(this);
-        this.resetPassword = this.resetPassword.bind(this);
-        this.getCurrentUser = this.getCurrentUser.bind(this);
+        const methods = [
+            "generateAuthToken", "verifyToken", "validateRole", "getOrCreateOfficialAdmin",
+            "sendWelcomeChatMessage", "sendWelcomeEmail", "onboardNewUser", "triggerNewUserWelcome",
+            "formatAuthUser", "notifyAdminNewUserSignup", "initiateSignup", "completeSignup",
+            "signin", "googleSignin", "forgotPassword", "resetPassword", "getCurrentUser",
+            "generateAndSendOTP", "verifyAndConsumeOTP", "registerAndOnboardUser"
+        ];
+        methods.forEach(fn => ((this as any)[fn] = (this as any)[fn].bind(this)));
     }
 
-    /**
-     * Singleton instance accessor with optional dependency injection
-     */
     public static getInstance(deps?: AuthDependencies): AuthService {
-        if (!this.instance) {
-            this.instance = new AuthService(this.instanceKey, deps);
-        }
+        if (!this.instance) this.instance = new AuthService(this.instanceKey, deps);
         return this.instance;
     }
 
-    /**
-     * Generate 30-day JWT token for an authenticated user
-     */
+    public validateRole(role?: string): string {
+        const userRole = role || "guest";
+        if (!["guest", "host"].includes(userRole)) {
+            httpError(400, "Invalid role. Only 'guest' or 'host' accounts can be registered.");
+        }
+        return userRole;
+    }
+
     public generateAuthToken(user: any): string {
         return this.jwtSigner.sign(
             { userId: user._id.toString(), role: user.role },
@@ -118,16 +123,10 @@ export default class AuthService {
         );
     }
 
-    /**
-     * Verify and decode a JWT token
-     */
     public verifyToken(token: string): any {
         return this.jwtSigner.verify(token, this.jwtSecret);
     }
 
-    /**
-     * Format user payload for consistent auth responses
-     */
     public formatAuthUser(user: any): FormattedAuthUser {
         return {
             id: user._id.toString(),
@@ -141,9 +140,20 @@ export default class AuthService {
         };
     }
 
-    /**
-     * Notify platform admin via email of a new user registration
-     */
+    public async generateAndSendOTP(email: string, subject?: string, title?: string): Promise<string> {
+        const otp = this.emailNotifier.generateOTP();
+        await this.otpModel.findOneAndUpdate({ email }, { email, otp }, { upsert: true, new: true });
+        const emailResult = await this.emailNotifier.sendOTPEmail(email, otp, subject, title);
+        if (!emailResult?.success) httpError(500, "Failed to send OTP email");
+        return otp;
+    }
+
+    public async verifyAndConsumeOTP(email: string, otp: string): Promise<void> {
+        const otpRecord = await this.otpModel.findOne({ email, otp });
+        if (!otpRecord) httpError(400, "Invalid or expired OTP");
+        await this.otpModel.deleteOne({ email, otp });
+    }
+
     public notifyAdminNewUserSignup(user: any, source: string = ""): void {
         const adminEmail = process.env.ADMIN_EMAIL || "teamsathithya@gmail.com";
         const username = `${user.firstname} ${user.lastname}`;
@@ -165,220 +175,159 @@ export default class AuthService {
         );
     }
 
-    /**
-     * Handle new user onboarding:
-     * 1. Find or create the "Athithya Official" admin account in DB with profile avatar.
-     * 2. Send an auto-generated welcome chat message from Athithya Official to the new user.
-     * 3. Send a branded welcome email to the new user.
-     */
-    public async triggerNewUserWelcome(reqOrIo: any, user: any): Promise<void> {
-        if (this.welcomeNotifier) {
-            return this.welcomeNotifier(reqOrIo, user);
+    public async getOrCreateOfficialAdmin(): Promise<any> {
+        let adminUser = (await this.userModel.findOne({
+            $or: [
+                { firstname: "Athithya", lastname: "Official" },
+                { role: "admin", firstname: /athithya/i }
+            ]
+        })) || (await this.userModel.findOne({ role: "admin" }));
+
+        if (!adminUser) {
+            const hashedPass = await bcrypt.hash(Math.random().toString(36), 10);
+            return await this.userModel.create({
+                firstname: "Athithya",
+                lastname: "Official",
+                email: "teamsathithya@gmail.com",
+                password: hashedPass,
+                role: "admin",
+                isVerified: true,
+                avatar: { url: "/athithya-logo.png" }
+            });
         }
 
+        let updated = false;
+        if (adminUser.firstname === "Admin" || !adminUser.firstname) {
+            adminUser.firstname = "Athithya";
+            adminUser.lastname = "Official";
+            updated = true;
+        }
+        if (!adminUser.avatar?.url) {
+            adminUser.avatar = { url: "/athithya-logo.png" };
+            updated = true;
+        }
+        if (updated) await adminUser.save();
+        return adminUser;
+    }
+
+    public async sendWelcomeChatMessage(user: any, adminUser?: any): Promise<any> {
+        const admin = adminUser || (await this.getOrCreateOfficialAdmin());
+        const isHost = user.role === "host";
+        const roleText = isHost ? "host" : "guest";
+        const firstName = user.firstname || (isHost ? "Host" : "Guest");
+        const welcomeChatText = `Dear ${roleText} ${firstName}, Welcome to Athithya! Thank you for creating an account as a ${roleText} in Athithya! If you have any queries, feel free to share them with us.`;
+
+        let conversation = await this.conversationModel.findOne({
+            participants: { $all: [admin._id, user._id], $size: 2 }
+        });
+
+        if (!conversation) {
+            const unreadMap = new Map();
+            unreadMap.set(admin._id.toString(), 0);
+            unreadMap.set(user._id.toString(), 1);
+
+            conversation = await this.conversationModel.create({
+                participants: [admin._id, user._id],
+                unreadCounts: unreadMap
+            });
+        }
+
+        const message = await this.messageModel.create({
+            conversationId: conversation._id,
+            sender: admin._id,
+            recipient: user._id,
+            text: welcomeChatText,
+            messageType: "text"
+        });
+
+        const targetUserId = user._id.toString();
+        await this.conversationModel.findByIdAndUpdate(conversation._id, {
+            $set: {
+                lastMessage: {
+                    text: welcomeChatText,
+                    sender: admin._id,
+                    createdAt: new Date()
+                },
+                [`unreadCounts.${targetUserId}`]: 1
+            }
+        });
+
+        const populatedMsg = await this.messageModel.findById(message._id).populate("sender", "firstname lastname avatar");
+        notificationService.emitToUser(targetUserId, "new_message", populatedMsg);
+        return message;
+    }
+
+    public async sendWelcomeEmail(user: any): Promise<void> {
+        const isHost = user.role === "host";
+        const roleText = isHost ? "host" : "guest";
+        const firstName = user.firstname || (isHost ? "Host" : "Guest");
+        const emailBody = `
+            <p style="color: #374151; font-size: 15px; line-height: 1.6; margin-bottom: 20px;">
+                Dear ${roleText} <strong>${firstName}</strong>, Thank you for creating an account as a <strong>${roleText}</strong> in Athithya! If you have any queries, feel free to share them with us.
+            </p>
+        `;
+        const emailRenderer = this.emailNotifier.renderBrandedEmail || renderBrandedEmail;
+        const emailHtml = emailRenderer(`Welcome to Athithya, ${firstName}!`, emailBody, "Welcome");
+
+        const emailSender = this.emailNotifier.sendHtmlEmail || sendHtmlEmail;
+        emailSender(user.email, "Welcome to Athithya!", emailHtml).catch((err: any) => {
+            console.error("Failed to send welcome email:", err);
+        });
+    }
+
+    public async onboardNewUser(user: any): Promise<void> {
+        if (this.welcomeNotifier) return this.welcomeNotifier(user);
         try {
             if (!user || !user._id) return;
-
-            // 1. Locate or create "Athithya Official" admin user
-            let adminUser = await this.userModel.findOne({
-                $or: [
-                    { firstname: "Athithya", lastname: "Official" },
-                    { role: "admin", firstname: /athithya/i }
-                ]
-            });
-
-            if (!adminUser) {
-                adminUser = await this.userModel.findOne({ role: "admin" });
-            }
-
-            if (!adminUser) {
-                const hashedPass = await bcrypt.hash(Math.random().toString(36), 10);
-                adminUser = await this.userModel.create({
-                    firstname: "Athithya",
-                    lastname: "Official",
-                    email: "teamsathithya@gmail.com",
-                    password: hashedPass,
-                    role: "admin",
-                    isVerified: true,
-                    avatar: { url: "/athithya-logo.png" }
-                });
-            } else {
-                let updated = false;
-                if (adminUser.firstname === "Admin" || !adminUser.firstname) {
-                    adminUser.firstname = "Athithya";
-                    adminUser.lastname = "Official";
-                    updated = true;
-                }
-                if (!adminUser.avatar || !adminUser.avatar.url) {
-                    adminUser.avatar = { url: "/athithya-logo.png" };
-                    updated = true;
-                }
-                if (updated) {
-                    await adminUser.save();
-                }
-            }
-
-            // 2. Prepare welcome message text based on role
-            const isHost = user.role === "host";
-            const roleText = isHost ? "host" : "guest";
-            const firstName = user.firstname || (isHost ? "Host" : "Guest");
-            const welcomeChatText = `Dear ${roleText} ${firstName}, Welcome to Athithya! Thank you for creating an account as a ${roleText} in Athithya! If you have any queries, feel free to share them with us.`;
-
-            // 3. Create or find 1-on-1 Conversation between Admin and New User
-            let conversation = await this.conversationModel.findOne({
-                participants: { $all: [adminUser._id, user._id], $size: 2 }
-            });
-
-            if (!conversation) {
-                const unreadMap = new Map();
-                unreadMap.set(adminUser._id.toString(), 0);
-                unreadMap.set(user._id.toString(), 1);
-
-                conversation = await this.conversationModel.create({
-                    participants: [adminUser._id, user._id],
-                    unreadCounts: unreadMap
-                });
-            }
-
-            // 4. Create Message from Admin to User
-            const message = await this.messageModel.create({
-                conversationId: conversation._id,
-                sender: adminUser._id,
-                recipient: user._id,
-                text: welcomeChatText,
-                messageType: "text"
-            });
-
-            // 5. Update Conversation metadata
-            const targetUserId = user._id.toString();
-            await this.conversationModel.findByIdAndUpdate(conversation._id, {
-                $set: {
-                    lastMessage: {
-                        text: welcomeChatText,
-                        sender: adminUser._id,
-                        createdAt: new Date()
-                    },
-                    [`unreadCounts.${targetUserId}`]: 1
-                }
-            });
-
-            // 6. Real-time Socket.io broadcast to new user
-            const io = reqOrIo?.app?.get ? reqOrIo.app.get("io") : (reqOrIo?.io || reqOrIo);
-            if (io && typeof io.to === "function") {
-                const populatedMsg = await this.messageModel.findById(message._id).populate("sender", "firstname lastname avatar");
-                io.to(targetUserId).emit("new_message", populatedMsg);
-            }
-
-            // 7. Send Welcome Email to User
-            const emailSubject = "Welcome to Athithya!";
-            const emailHtml = `
-                <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 16px; background-color: #ffffff;">
-                    <div style="background-color: #1a1a1a; padding: 25px; border-radius: 12px 12px 0 0; text-align: center;">
-                        <h1 style="color: #C59A2F; margin: 0; font-size: 26px; letter-spacing: 3px; font-weight: 800;">ATHITHYA</h1>
-                    </div>
-                    <div style="padding: 30px 25px;">
-                        <h2 style="color: #111827; margin-top: 0; font-size: 20px;">Welcome to Athithya, ${firstName}!</h2>
-                        <p style="color: #374151; font-size: 15px; line-height: 1.6; margin-bottom: 20px;">
-                            Dear ${roleText} <strong>${firstName}</strong>, Thank you for creating an account as a <strong>${roleText}</strong> in Athithya! If you have any queries, feel free to share them with us.
-                        </p>
-                        <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
-                            Best regards,<br>
-                            <strong style="color: #111827;">The Athithya Team</strong>
-                        </p>
-                    </div>
-                    <div style="background-color: #f9fafb; padding: 15px; border-radius: 0 0 12px 12px; text-align: center; border-top: 1px solid #f3f4f6;">
-                        <p style="color: #9ca3af; font-size: 12px; margin: 0;">&copy; ${new Date().getFullYear()} Athithya. All rights reserved.</p>
-                    </div>
-                </div>
-            `;
-
-            const emailSender = this.emailNotifier.sendHtmlEmail || sendHtmlEmail;
-            emailSender(user.email, emailSubject, emailHtml).catch((err: any) => {
-                console.error("Failed to send welcome email:", err);
-            });
+            const adminUser = await this.getOrCreateOfficialAdmin();
+            await this.sendWelcomeChatMessage(user, adminUser);
+            await this.sendWelcomeEmail(user);
         } catch (err) {
-            console.error("Error in triggerNewUserWelcome onboarding helper:", err);
+            console.error("Error onboarding new user:", err);
         }
     }
 
-    /**
-     * Initiate signup by validating and emailing OTP
-     */
+    public async triggerNewUserWelcome(user: any): Promise<void> {
+        return this.onboardNewUser(user);
+    }
+
+    public async registerAndOnboardUser(userData: any, source: string = ""): Promise<any> {
+        const user = await this.userModel.create(userData);
+        this.onboardNewUser(user).catch((err: any) =>
+            console.error("Onboarding welcome error:", err)
+        );
+        this.notifyAdminNewUserSignup(user, source);
+        return user;
+    }
+
     public async initiateSignup(email: string, role?: string): Promise<{ email: string }> {
-        if (!email) {
-            const error: any = new Error("Email is required");
-            error.statusCode = 400;
-            throw error;
-        }
-
+        if (!email) httpError(400, "Email is required");
         const existingUser = await this.userModel.findOne({ email });
-        if (existingUser) {
-            const error: any = new Error("Email already registered");
-            error.statusCode = 400;
-            throw error;
-        }
+        if (existingUser) httpError(400, "Email already registered");
 
-        if (role && !["guest", "host"].includes(role)) {
-            const error: any = new Error("Invalid role");
-            error.statusCode = 400;
-            throw error;
-        }
-
-        const otp = this.emailNotifier.generateOTP();
-        await this.otpModel.findOneAndUpdate({ email }, { email, otp }, { upsert: true, new: true });
-        const emailResult = await this.emailNotifier.sendOTPEmail(email, otp);
-
-        if (!emailResult.success) {
-            const error: any = new Error("Failed to send OTP email");
-            error.statusCode = 500;
-            throw error;
-        }
-
+        this.validateRole(role);
+        await this.generateAndSendOTP(email);
         return { email };
     }
 
-    /**
-     * Complete signup by verifying OTP and creating user
-     */
     public async completeSignup(
         firstname: string,
         lastname: string,
         email: string,
         password: string,
         role?: string,
-        otp?: string,
-        io?: any
+        otp?: string
     ): Promise<AuthResponse> {
-        if (!email || !password || !otp) {
-            const error: any = new Error("Email, password, and OTP are required");
-            error.statusCode = 400;
-            throw error;
-        }
+        if (!email || !password || !otp) httpError(400, "Email, password, and OTP are required");
 
         const existingUser = await this.userModel.findOne({ email });
-        if (existingUser) {
-            const error: any = new Error("User already exists");
-            error.statusCode = 400;
-            throw error;
-        }
+        if (existingUser) httpError(400, "User already exists");
 
-        const userRole = role || "guest";
-        if (!["guest", "host"].includes(userRole)) {
-            const error: any = new Error("Invalid role");
-            error.statusCode = 400;
-            throw error;
-        }
+        const userRole = this.validateRole(role);
+        await this.verifyAndConsumeOTP(email, otp);
 
-        const otpRecord = await this.otpModel.findOne({ email, otp });
-        if (!otpRecord) {
-            const error: any = new Error("Invalid or expired OTP");
-            error.statusCode = 400;
-            throw error;
-        }
-
-        await this.otpModel.deleteOne({ email, otp });
         const hashedPass = await bcrypt.hash(password, 10);
-        const user = await this.userModel.create({
+        const user = await this.registerAndOnboardUser({
             firstname,
             lastname,
             email,
@@ -387,15 +336,7 @@ export default class AuthService {
             isVerified: true
         });
 
-        if (io) {
-            this.triggerNewUserWelcome({ io }, user).catch((err: any) =>
-                console.error("Onboarding welcome error:", err)
-            );
-        }
-
-        this.notifyAdminNewUserSignup(user);
         const token = this.generateAuthToken(user);
-
         return {
             user: this.formatAuthUser(user),
             token,
@@ -403,59 +344,34 @@ export default class AuthService {
         };
     }
 
-    /**
-     * Sign in with email and password
-     */
     public async signin(email: string, password: string): Promise<AuthResponse> {
-        if (!email || !password) {
-            const error: any = new Error("Email and password are required");
-            error.statusCode = 400;
-            throw error;
-        }
+        if (!email || !password) httpError(400, "Email and password are required");
 
         const user = await this.userModel.findOne({ email });
         if (!user || !(await bcrypt.compare(password, user.password))) {
-            const error: any = new Error("Invalid credentials");
-            error.statusCode = 400;
-            throw error;
+            httpError(400, "Invalid credentials");
         }
 
         const token = this.generateAuthToken(user);
-
         return {
             user: this.formatAuthUser(user),
             token
         };
     }
 
-    /**
-     * Google OAuth Signin/Signup
-     */
-    public async googleSignin(token: string, role?: string, io?: any): Promise<AuthResponse> {
-        if (!token) {
-            const error: any = new Error("Google access token is required");
-            error.statusCode = 400;
-            throw error;
-        }
+    public async googleSignin(token: string, role?: string): Promise<AuthResponse> {
+        if (!token) httpError(400, "Google access token is required");
 
-        if (role && !["guest", "host"].includes(role)) {
-            const error: any = new Error("Invalid role. Only 'guest' or 'host' accounts can be registered.");
-            error.statusCode = 400;
-            throw error;
-        }
-
-        const userRole = role === "host" ? "host" : "guest";
+        const userRole = this.validateRole(role);
         const googleRes = await axios.get("https://www.googleapis.com/oauth2/v3/userinfo", {
             headers: { Authorization: `Bearer ${token}` }
         });
         const { email, given_name, family_name, picture } = googleRes.data;
 
         let user = await this.userModel.findOne({ email });
-        let isNewUser = false;
-
         if (!user) {
             const hashedPass = await bcrypt.hash(Math.random().toString(36), 10);
-            user = await this.userModel.create({
+            user = await this.registerAndOnboardUser({
                 firstname: given_name,
                 lastname: family_name || "",
                 email,
@@ -463,125 +379,52 @@ export default class AuthService {
                 role: userRole,
                 isVerified: true,
                 avatar: picture ? { url: picture } : undefined
-            });
-            isNewUser = true;
+            }, "via Google");
         } else if (!user.isVerified) {
             user.isVerified = true;
             await user.save();
         }
 
-        if (isNewUser) {
-            if (io) {
-                this.triggerNewUserWelcome({ io }, user).catch((err: any) =>
-                    console.error("Onboarding welcome error:", err)
-                );
-            }
-
-            this.notifyAdminNewUserSignup(user, "via Google");
-        }
-
         const jwtToken = this.generateAuthToken(user);
-
         return {
             user: this.formatAuthUser(user),
             token: jwtToken
         };
     }
 
-    /**
-     * Forgot password OTP request
-     */
     public async forgotPassword(email: string): Promise<boolean> {
-        if (!email) {
-            const error: any = new Error("Email is required");
-            error.statusCode = 400;
-            throw error;
-        }
+        if (!email) httpError(400, "Email is required");
 
         const user = await this.userModel.findOne({ email });
-        if (!user) {
-            const error: any = new Error("No account found with this email address");
-            error.statusCode = 404;
-            throw error;
-        }
+        if (!user) httpError(404, "No account found with this email address");
 
-        const otp = this.emailNotifier.generateOTP();
-        await this.otpModel.findOneAndUpdate({ email }, { email, otp }, { upsert: true, new: true });
-        const emailResult = await this.emailNotifier.sendOTPEmail(
-            email,
-            otp,
-            "Password Reset - OTP",
-            "Password Reset Request"
-        );
-
-        if (!emailResult.success) {
-            const error: any = new Error("Failed to send OTP");
-            error.statusCode = 500;
-            throw error;
-        }
-
+        await this.generateAndSendOTP(email, "Password Reset - OTP", "Password Reset Request");
         return true;
     }
 
-    /**
-     * Reset password using verified OTP
-     */
     public async resetPassword(email: string, otp: string, newPassword: string): Promise<boolean> {
-        if (!email || !otp || !newPassword) {
-            const error: any = new Error("Email, OTP, and new password are required");
-            error.statusCode = 400;
-            throw error;
-        }
+        if (!email || !otp || !newPassword) httpError(400, "Email, OTP, and new password are required");
 
         const user = await this.userModel.findOne({ email });
-        if (!user) {
-            const error: any = new Error("No account found with this email address");
-            error.statusCode = 404;
-            throw error;
-        }
+        if (!user) httpError(404, "No account found with this email address");
 
-        const otpRecord = await this.otpModel.findOne({ email, otp });
-        if (!otpRecord) {
-            const error: any = new Error("Invalid or expired OTP");
-            error.statusCode = 400;
-            throw error;
-        }
+        await this.verifyAndConsumeOTP(email, otp);
 
         const hashedPass = await bcrypt.hash(newPassword, 10);
         user.password = hashedPass;
         await user.save();
-
-        await this.otpModel.deleteOne({ email, otp });
         return true;
     }
 
-    /**
-     * Get current authenticated user details
-     */
     public async getCurrentUser(userId: string): Promise<any> {
-        if (!userId) {
-            const error: any = new Error("User ID is required");
-            error.statusCode = 400;
-            throw error;
-        }
+        if (!userId) httpError(400, "User ID is required");
 
         const user = await this.userModel.findById(userId).select("-password -otp -otpExpires");
-        if (!user) {
-            const error: any = new Error("User session invalid or user not found");
-            error.statusCode = 401;
-            throw error;
-        }
+        if (!user) httpError(401, "User session invalid or user not found");
 
         return {
-            id: user._id.toString(),
-            _id: user._id.toString(),
-            firstname: user.firstname,
-            lastname: user.lastname,
-            email: user.email,
-            role: user.role,
-            avatar: user.avatar || null,
+            ...this.formatAuthUser(user),
             hostStatus: user.hostStatus || (user.role === "host" ? "pending_verification" : undefined),
-            isVerified: user.isVerified || false,
             phone: user.phone || "",
             bio: user.bio || "",
             location: user.location || null
@@ -593,9 +436,13 @@ export default class AuthService {
 export const authService = AuthService.getInstance();
 export const verifyToken = authService.verifyToken;
 export const triggerNewUserWelcome = authService.triggerNewUserWelcome;
+export const onboardNewUser = authService.onboardNewUser;
 
 // CommonJS compatibility
 module.exports = authService;
 module.exports.default = AuthService;
 module.exports.AuthService = AuthService;
 module.exports.authService = authService;
+module.exports.verifyToken = verifyToken;
+module.exports.triggerNewUserWelcome = triggerNewUserWelcome;
+module.exports.onboardNewUser = onboardNewUser;

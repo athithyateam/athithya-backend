@@ -1,6 +1,7 @@
 const { User, Notification, HostHistory } = require("../../db/mongoose");
 const { sendHtmlEmail } = require("../../services/emailService");
 const { deleteFile } = require("../../services/storageService");
+const { notificationService } = require("../../services/notificationService");
 
 const saveHostOldDetails = async (user, changedFields = []) => {
     try {
@@ -243,28 +244,20 @@ exports.updateHostVerificationStatus = async (req, res) => {
             await user.save();
             await User.updateOne({ _id: userId }, { $unset: { pendingHostDetails: 1 } });
 
-            // Send notification
-            try {
-                await Notification.create({
-                    recipient: userId,
-                    sender: req.user?.userId || req.user?.id,
-                    title: notificationTitle,
-                    message: notificationMessage,
-                    type: status === 'approved' ? 'success' : 'error',
-                    link: `/profile/${userId}`
-                });
-            } catch (notifErr) {
-                console.error("Failed to create notification:", notifErr);
-            }
+            // Send notification & real-time emit
+            await notificationService.sendNotification({
+                recipient: userId,
+                sender: req.user?.userId || req.user?.id,
+                title: notificationTitle,
+                message: notificationMessage,
+                type: status === 'approved' ? 'success' : 'error',
+                link: `/profile/${userId}`
+            });
 
-            // Real-time notification via Socket.io
-            const io = req.app.get("io");
-            if (io) {
-                io.to(userId.toString()).emit("host_status_update", {
-                    status: user.hostStatus,
-                    message: notificationMessage
-                });
-            }
+            notificationService.emitToUser(userId, "host_status_update", {
+                status: user.hostStatus,
+                message: notificationMessage
+            });
 
             // Send email to Host
             if (user.email) {
@@ -312,27 +305,20 @@ exports.updateHostVerificationStatus = async (req, res) => {
             ? "Congratulations, your host account has been approved. You can now add experiences!" 
             : `Sorry, your host account verification was rejected. ${reason || "Please check your details and try again."}`;
 
-        try {
-            await Notification.create({
-                recipient: userId,
-                sender: req.user?.userId || req.user?.id,
-                title: notificationTitle,
-                message: notificationMessage,
-                type: status === 'approved' ? 'success' : 'error',
-                link: status === 'approved' ? '/post' : `/profile/${userId}`
-            });
-        } catch (notifErr) {
-            console.error("Failed to create notification:", notifErr);
-        }
+        // Send notification & real-time emit
+        await notificationService.sendNotification({
+            recipient: userId,
+            sender: req.user?.userId || req.user?.id,
+            title: notificationTitle,
+            message: notificationMessage,
+            type: status === 'approved' ? 'success' : 'error',
+            link: status === 'approved' ? '/post' : `/profile/${userId}`
+        });
 
-        // Real-time notification via Socket.io
-        const io = req.app.get("io");
-        if (io) {
-            io.to(userId.toString()).emit("host_status_update", {
-                status,
-                message: notificationMessage
-            });
-        }
+        notificationService.emitToUser(userId, "host_status_update", {
+            status,
+            message: notificationMessage
+        });
 
         // Send email to Host
         if (user.email) {

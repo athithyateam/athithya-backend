@@ -110,8 +110,8 @@ export class UserService {
         return this.profileService.getTopRatedHosts(limit, page, minRating, location);
     }
 
-    public async updateProfile(userId: string, profileData: any, io?: any): Promise<any> {
-        return this.profileService.updateProfile(userId, profileData, io);
+    public async updateProfile(userId: string, profileData: any): Promise<any> {
+        return this.profileService.updateProfile(userId, profileData);
     }
 
     // Verification Sub-Service Delegations
@@ -129,27 +129,26 @@ export class UserService {
 
     public async submitHostVerification(
         userId: string,
-        data: HostVerificationData,
-        io?: any
+        data: HostVerificationData
     ): Promise<{ hostStatus: string }> {
-        return this.verificationService.submitHostVerification(userId, data, io);
+        return this.verificationService.submitHostVerification(userId, data);
     }
 
     // Social Sub-Service Delegations
-    public async sendFriendRequest(targetUserId: string, currentUserId: string, io?: any): Promise<boolean> {
-        return this.socialService.sendFriendRequest(targetUserId, currentUserId, io);
+    public async sendFriendRequest(targetUserId: string, currentUserId: string): Promise<boolean> {
+        return this.socialService.sendFriendRequest(targetUserId, currentUserId);
     }
 
-    public async acceptFriendRequest(requesterId: string, currentUserId: string, io?: any): Promise<boolean> {
-        return this.socialService.acceptFriendRequest(requesterId, currentUserId, io);
+    public async acceptFriendRequest(requesterId: string, currentUserId: string): Promise<boolean> {
+        return this.socialService.acceptFriendRequest(requesterId, currentUserId);
     }
 
-    public async rejectFriendRequest(requesterId: string, currentUserId: string, io?: any): Promise<boolean> {
-        return this.socialService.rejectFriendRequest(requesterId, currentUserId, io);
+    public async rejectFriendRequest(requesterId: string, currentUserId: string): Promise<boolean> {
+        return this.socialService.rejectFriendRequest(requesterId, currentUserId);
     }
 
-    public async unfriend(targetUserId: string, currentUserId: string, io?: any): Promise<boolean> {
-        return this.socialService.unfriend(targetUserId, currentUserId, io);
+    public async unfriend(targetUserId: string, currentUserId: string): Promise<boolean> {
+        return this.socialService.unfriend(targetUserId, currentUserId);
     }
 
     public async getFriends(userId: string, page?: number | string, limit?: number | string): Promise<{ count: number; data: any[] }> {

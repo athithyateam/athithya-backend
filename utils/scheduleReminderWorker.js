@@ -1,11 +1,12 @@
-const { GuestSchedule, Notification } = require("../db/mongoose");
+const { GuestSchedule } = require("../db/mongoose");
 const { sendHtmlEmail } = require("./emailService");
+const { notificationService } = require("../services/notificationService");
 
 /**
  * Periodically check for due guest experience schedules, send in-app bell
  * notifications and emails, and auto-delete completed schedule records.
  *
- * @param {Object} app - Express app instance (to access Socket.io)
+ * @param {Object} [app] - Optional Express app instance
  */
 function startScheduleReminderWorker(app) {
     // Run worker every 30 seconds
@@ -32,11 +33,11 @@ function startScheduleReminderWorker(app) {
                 const postTitle = sch.post.title || "Experience";
                 const guestName = sch.user.firstname || "guest";
 
-                // 1. Send In-App Bell Notification
+                // 1. Send In-App Bell Notification via NotificationService
                 const notifMessage = `Dear guest ${guestName}, your scheduled experience "${postTitle}" for ${dateStr} at ${timeStr} has arrived! Click here to open and book your trip.`;
 
                 try {
-                    const notif = await Notification.create({
+                    await notificationService.sendNotification({
                         recipient: sch.user._id,
                         sender: sch.user._id,
                         title: "Scheduled Experience Reminder",
@@ -45,11 +46,6 @@ function startScheduleReminderWorker(app) {
                         link: `/post/${sch.post._id}`,
                         metadata: { postId: sch.post._id }
                     });
-
-                    const io = app?.get ? app.get("io") : null;
-                    if (io) {
-                        io.to(sch.user._id.toString()).emit("new_notification", notif);
-                    }
                 } catch (notifErr) {
                     console.error("Failed to create reminder bell notification:", notifErr);
                 }

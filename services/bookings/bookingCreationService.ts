@@ -1,7 +1,8 @@
 import mongoose from "mongoose";
-import { Booking, Post, User, Notification, Schedule } from "../../db/mongoose";
+import { Booking, Post, User, Schedule } from "../../db/mongoose";
 import { createRazorpayOrder, verifyRazorpaySignature, fetchPaymentDetails } from "../../utils/razorpay";
-import { sendHtmlEmail } from "../emailService";
+import { sendHtmlEmail, renderBrandedEmail } from "../emailService";
+import { notificationService } from "../notificationService";
 const { triggerHostBookingWelcome } = require("../../utils/hostBookingChatHelper");
 
 export interface CreateBookingInput {
@@ -34,34 +35,19 @@ export interface PricingResult {
     payableAmount: number;
 }
 
+/**
+ * Dispatches notification via centralized NotificationService.
+ * Backwards-compatible signature supports either dispatchNotification(payload) or legacy dispatchNotification(io, payload).
+ */
 export async function dispatchNotification(
-    io: any,
-    payload: { recipient: any; sender: any; title: string; message: string; type: string; link?: string; metadata?: any }
+    recipientOrIo: any,
+    payload?: any
 ): Promise<any> {
-    try {
-        const notif = await new Notification({ ...payload, link: payload.link || "/", metadata: payload.metadata || {} }).save();
-        if (io && payload.recipient) io.to(payload.recipient.toString()).emit("new_notification", notif);
-        return notif;
-    } catch (err) {
-        console.error("Error creating/dispatching notification:", err);
-        return null;
-    }
+    const options = payload || recipientOrIo;
+    return notificationService.sendNotification(options);
 }
 
-export function renderBrandedEmail(title: string, bodyHtml: string, subtitle?: string): string {
-    return `
-        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; background-color: #ffffff;">
-            <div style="background-color: #1a1a1a; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
-                <h1 style="color: #C59A2F; margin: 0; font-size: 26px; letter-spacing: 2px;">ATHITHYA</h1>
-                ${subtitle ? `<p style="color: #fff; margin: 5px 0 0 0; font-size: 14px; text-transform: uppercase;">${subtitle}</p>` : ""}
-            </div>
-            <div style="padding: 24px;">
-                <h2 style="color: #1a1a1a; margin-top: 0; font-size: 20px;">${title}</h2>
-                ${bodyHtml}
-            </div>
-        </div>
-    `;
-}
+export { renderBrandedEmail } from "../emailService";
 
 export function calculateBookingPricing(
     post: any,
@@ -192,7 +178,7 @@ export class BookingCreationService {
         return { isInviteBooking, effectivePeople };
     }
 
-    public async createBooking(data: CreateBookingInput, userId: string, userRole: string, io?: any): Promise<any> {
+    public async createBooking(data: CreateBookingInput, userId: string, userRole: string): Promise<any> {
         const { postId, numberOfPeople, startDate, endDate, selectedTime, guestMessage, invitedUserIds, parentBookingId, scheduleId } = data;
         const peopleCount = Number(numberOfPeople);
 
@@ -268,12 +254,12 @@ export class BookingCreationService {
         });
 
         await booking.save();
-        if (pricing.payableAmount <= 0) await this.processBookingConfirmation(booking, io);
+        if (pricing.payableAmount <= 0) await this.processBookingConfirmation(booking);
 
         return { bookingId: booking._id, orderId: booking.orderId, amount: pricing.payableAmount, currency: "INR" };
     }
 
-    public async verifyPayment(data: VerifyPaymentInput, userId: string, io?: any): Promise<any> {
+    public async verifyPayment(data: VerifyPaymentInput, userId: string): Promise<any> {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature, bookingId } = data;
         if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !bookingId) {
             const err: any = new Error("Missing payment verification details");
@@ -299,11 +285,11 @@ export class BookingCreationService {
         try { booking.paymentDetails = await fetchPaymentDetails(razorpay_payment_id); } catch (e) {}
         await booking.save();
 
-        const scheduleResult = await this.processBookingConfirmation(booking, io);
+        const scheduleResult = await this.processBookingConfirmation(booking);
         return { booking, schedule: scheduleResult?.schedule || null, scheduleId: booking.scheduleId };
     }
 
-    public async processBookingConfirmation(booking: any, io?: any): Promise<{ schedule: any }> {
+    public async processBookingConfirmation(booking: any): Promise<{ schedule: any }> {
         const guestId = booking.guest?._id || booking.guest;
         const hostId = booking.host?._id || booking.host;
 
@@ -335,7 +321,7 @@ export class BookingCreationService {
             } catch (hErr) { console.error("Host badge update error:", hErr); }
         }
 
-        try { triggerHostBookingWelcome({ io }, booking).catch(() => {}); } catch (dmErr) {}
+        try { triggerHostBookingWelcome({}, booking).catch(() => {}); } catch (dmErr) {}
 
         try {
             const guestUser = await User.findById(guestId, "firstname lastname email");
@@ -389,7 +375,7 @@ export class BookingCreationService {
                 if (initiatorId && String(initiatorId).trim() !== String(guestId).trim()) {
                     const guestUser = await User.findById(guestId, "firstname lastname");
                     const name = guestUser ? `${guestUser.firstname} ${guestUser.lastname}` : "A traveler";
-                    await dispatchNotification(io, {
+                    await notificationService.sendNotification({
                         recipient: initiatorId,
                         sender: guestId,
                         title: "Friend Joined!",
@@ -400,7 +386,7 @@ export class BookingCreationService {
                     });
                 }
 
-                await dispatchNotification(io, {
+                await notificationService.sendNotification({
                     recipient: hostId,
                     sender: guestId,
                     title: "Booking Update",
@@ -426,7 +412,7 @@ export class BookingCreationService {
                 booking.scheduleId = scheduleObj._id;
                 await booking.save();
 
-                await dispatchNotification(io, {
+                await notificationService.sendNotification({
                     recipient: hostId,
                     sender: guestId,
                     title: "Booking Confirmed",

@@ -2,7 +2,11 @@ const { Post, User, Notification, HostHistory, Booking, Review } = require("../.
 const { storageService: defaultStorageService } = require("../storageService");
 const { googleDriveService: defaultGoogleDriveService } = require("../googleDriveService");
 const { emailService: defaultEmailService } = require("../emailService");
-const { notifyAdmins: defaultNotifyAdmins } = require("../../utils/notifyAdminHelper");
+import { notificationService } from "../notificationService";
+const defaultNotifyAdmins = (reqOrApp: any, payload?: any) => {
+    const opts = payload || reqOrApp;
+    return notificationService.notifyAdmins(opts);
+};
 const { userService: defaultUserService } = require("../userService");
 import { PostReactionService, postReactionService as defaultPostReactionService } from "./postReactionService";
 import { 

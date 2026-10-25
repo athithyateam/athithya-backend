@@ -1,6 +1,7 @@
 const { Post, Booking, Notification, HostHistory } = require("../../db/mongoose");
 const { deleteFile } = require("../../services/storageService");
 const { sendHtmlEmail } = require("../../services/emailService");
+const { notificationService } = require("../../services/notificationService");
 
 exports.getAllExperiences = async (req, res) => {
     try {
@@ -208,18 +209,13 @@ exports.updateExperienceStatus = async (req, res) => {
                 // ── 3. Finally delete the post document ──
                 await Post.findByIdAndDelete(post._id);
 
-                const notification = await Notification.create({
+                await notificationService.sendNotification({
                     recipient: hostId,
                     sender: req.user.userId,
                     title: "Experience Deletion Approved",
                     message: `The experience "${postTitle}" you requested for deletion has successfully been approved and deleted.`,
                     type: "success"
                 });
-
-                const io = req.app.get("io");
-                if (io) {
-                    io.to(hostId.toString()).emit("new_notification", notification);
-                }
 
                 // Send email
                 if (hostEmail) {
@@ -248,7 +244,7 @@ exports.updateExperienceStatus = async (req, res) => {
                 post.deleteRequested = false;
                 await post.save();
 
-                const notification = await Notification.create({
+                await notificationService.sendNotification({
                     recipient: post.user?._id || post.user,
                     sender: req.user.userId,
                     title: "Experience Deletion Rejected",
@@ -256,11 +252,6 @@ exports.updateExperienceStatus = async (req, res) => {
                     type: "info",
                     link: `/profile/${post.user?._id || post.user}`
                 });
-
-                const io = req.app.get("io");
-                if (io) {
-                    io.to((post.user?._id || post.user).toString()).emit("new_notification", notification);
-                }
 
                 // Send email
                 if (hostEmail) {
@@ -295,7 +286,7 @@ exports.updateExperienceStatus = async (req, res) => {
                 post.unhideRequested = false;
                 await post.save();
 
-                const notification = await Notification.create({
+                await notificationService.sendNotification({
                     recipient: post.user?._id || post.user,
                     sender: req.user.userId,
                     title: "Experience Hide Request Approved",
@@ -303,15 +294,13 @@ exports.updateExperienceStatus = async (req, res) => {
                     type: "info",
                     link: `/profile/${post.user?._id || post.user}`
                 });
-                const io = req.app.get("io");
-                if (io) io.to((post.user?._id || post.user).toString()).emit("new_notification", notification);
 
                 return res.json({ success: true, message: "Experience hide request approved successfully", post });
             } else if (status === 'inactive') {
                 post.hideRequested = false;
                 await post.save();
 
-                const notification = await Notification.create({
+                await notificationService.sendNotification({
                     recipient: post.user?._id || post.user,
                     sender: req.user.userId,
                     title: "Experience Hide Request Rejected",
@@ -319,8 +308,6 @@ exports.updateExperienceStatus = async (req, res) => {
                     type: "info",
                     link: `/profile/${post.user?._id || post.user}`
                 });
-                const io = req.app.get("io");
-                if (io) io.to((post.user?._id || post.user).toString()).emit("new_notification", notification);
 
                 return res.json({ success: true, message: "Experience hide request rejected", post });
             }
@@ -333,7 +320,7 @@ exports.updateExperienceStatus = async (req, res) => {
                 post.hideRequested = false;
                 await post.save();
 
-                const notification = await Notification.create({
+                await notificationService.sendNotification({
                     recipient: post.user?._id || post.user,
                     sender: req.user.userId,
                     title: "Experience Unhide Request Approved",
@@ -341,15 +328,13 @@ exports.updateExperienceStatus = async (req, res) => {
                     type: "success",
                     link: `/profile/${post.user?._id || post.user}`
                 });
-                const io = req.app.get("io");
-                if (io) io.to((post.user?._id || post.user).toString()).emit("new_notification", notification);
 
                 return res.json({ success: true, message: "Experience unhide request approved successfully", post });
             } else if (status === 'inactive') {
                 post.unhideRequested = false;
                 await post.save();
 
-                const notification = await Notification.create({
+                await notificationService.sendNotification({
                     recipient: post.user?._id || post.user,
                     sender: req.user.userId,
                     title: "Experience Unhide Request Rejected",
@@ -357,8 +342,6 @@ exports.updateExperienceStatus = async (req, res) => {
                     type: "info",
                     link: `/profile/${post.user?._id || post.user}`
                 });
-                const io = req.app.get("io");
-                if (io) io.to((post.user?._id || post.user).toString()).emit("new_notification", notification);
 
                 return res.json({ success: true, message: "Experience unhide request rejected", post });
             }
@@ -418,7 +401,7 @@ exports.updateExperienceStatus = async (req, res) => {
                 : `Your experience "${post.title}" was reviewed and rejected. ${remarks ? `Remarks: ${remarks}` : "Please check your details and try again."}`;
 
             try {
-                const notification = await Notification.create({
+                await notificationService.sendNotification({
                     recipient: post.user?._id || post.user,
                     sender: req.user?.userId || req.user?.id,
                     title: isApproved ? "Experience Approved" : "Experience Rejected",
@@ -426,11 +409,6 @@ exports.updateExperienceStatus = async (req, res) => {
                     type: isApproved ? "success" : "error",
                     link: isApproved ? `/post/${post._id}` : `/profile/${post.user?._id || post.user}`
                 });
-
-                const io = req.app.get("io");
-                if (io) {
-                    io.to((post.user?._id || post.user).toString()).emit("new_notification", notification);
-                }
 
                 if (hostEmail) {
                     const htmlContent = `

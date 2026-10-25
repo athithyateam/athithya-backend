@@ -5,8 +5,7 @@ const { bookingService } = require("../../services/bookingService");
  */
 exports.createBooking = async (req, res) => {
     try {
-        const io = req.app?.get("io");
-        const result = await bookingService.createBooking(req.body, req.user?.userId, req.user?.role, io);
+        const result = await bookingService.createBooking(req.body, req.user?.userId, req.user?.role);
 
         res.status(201).json({
             success: true,
@@ -28,8 +27,7 @@ exports.createBooking = async (req, res) => {
  */
 exports.verifyPayment = async (req, res) => {
     try {
-        const io = req.app?.get("io");
-        const result = await bookingService.verifyPayment(req.body, req.user?.userId, io);
+        const result = await bookingService.verifyPayment(req.body, req.user?.userId);
 
         res.status(200).json({
             success: true,

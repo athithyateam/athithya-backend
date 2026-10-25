@@ -3,6 +3,7 @@ const { User, Post, Review, Notification, HostHistory } = require("../../db/mong
 const { deleteFile } = require("../storageService");
 const { parseIfJson } = require("../posts/postPayloadParser");
 const { sendTemplateEmail } = require("../emailService");
+import { notificationService } from "../notificationService";
 
 export interface LocationData {
     latitude: number | string;
@@ -601,7 +602,7 @@ export class ProfileService {
     /**
      * Service: Update user profile (guest or host)
      */
-    public async updateProfile(userId: string, profileData: any, io: any = null): Promise<any> {
+    public async updateProfile(userId: string, profileData: any): Promise<any> {
         const {
             firstname, lastname, description, removeAvatar, interests, avatarUrl, avatarPublicId,
             phone, physicalAddress, pincode, existingAadhaar, city, district, state, yearsOfExperience,
@@ -785,32 +786,24 @@ export class ProfileService {
                     }
                 }).catch((err: any) => console.error("Failed to send admin host profile update verification email:", err));
 
-                // Notify admins via DB notification (bell icon)
+                // Notify admins via centralized NotificationService
                 try {
-                    const admins = await this.userModel.find({ role: 'admin' });
-                    const dbNotifications = admins.map((admin: any) => ({
-                        recipient: admin._id,
-                        sender: user._id,
+                    await notificationService.notifyAdmins({
+                        senderId: user._id,
                         title: "Host Profile Update Request",
                         message: `Host ${user.firstname} ${user.lastname} has requested to update verification details.`,
                         type: 'info',
                         link: `/admin`,
                         metadata: { userId: user._id }
-                    }));
-                    const savedNotifications = await this.notificationModel.insertMany(dbNotifications);
+                    });
 
-                    if (io) {
-                        savedNotifications.forEach((notif: any) => {
-                            io.to(notif.recipient.toString()).emit("new_notification", notif);
-                        });
-                        io.emit("admin_new_verification_request", {
-                            userId: user._id,
-                            name: `${user.firstname} ${user.lastname}`,
-                            isProfileUpdate: true
-                        });
-                    }
+                    notificationService.emitToAll("admin_new_verification_request", {
+                        userId: user._id,
+                        name: `${user.firstname} ${user.lastname}`,
+                        isProfileUpdate: true
+                    });
                 } catch (notifErr: any) {
-                    console.error("Failed to notify admins via DB notification:", notifErr);
+                    console.error("Failed to notify admins:", notifErr);
                 }
 
                 return {

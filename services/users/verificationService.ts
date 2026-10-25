@@ -2,6 +2,7 @@ const { User, OTP, Notification } = require("../../db/mongoose");
 const { parseIfJson } = require("../posts/postPayloadParser");
 const brevo = require("@getbrevo/brevo");
 const { generateOTP, sendTemplateEmail } = require("../emailService");
+import { notificationService } from "../notificationService";
 
 // Initialize Brevo transactional SMS API client
 const defaultSmsApiInstance = new brevo.TransactionalSMSApi();
@@ -217,8 +218,7 @@ export class VerificationService {
      */
     public async submitHostVerification(
         userId: string,
-        data: HostVerificationData,
-        io: any = null
+        data: HostVerificationData
     ): Promise<{ hostStatus: string }> {
         const { phone, physicalAddress, pincode, city, district, state, yearsOfExperience, aadhaar, aadhaarCardData: providedAadhaar } = data;
 
@@ -316,29 +316,21 @@ export class VerificationService {
         }).catch((err: any) => console.error("Failed to send admin host verification email:", err));
 
         try {
-            const admins = await this.userModel.find({ role: 'admin' });
-            const notifications = admins.map((admin: any) => ({
-                recipient: admin._id,
-                sender: user._id,
+            await notificationService.notifyAdmins({
+                senderId: user._id,
                 title: "New Host Verification Request",
                 message: `${user.firstname} ${user.lastname} has applied to become a host.`,
                 type: 'info',
                 link: `/admin`,
                 metadata: { userId: user._id }
-            }));
-            const savedNotifications = await this.notificationModel.insertMany(notifications);
+            });
 
-            if (io) {
-                savedNotifications.forEach((notif: any) => {
-                    io.to(notif.recipient.toString()).emit("new_notification", notif);
-                });
-                io.emit("admin_new_verification_request", {
-                    userId: user._id,
-                    name: `${user.firstname} ${user.lastname}`
-                });
-            }
+            notificationService.emitToAll("admin_new_verification_request", {
+                userId: user._id,
+                name: `${user.firstname} ${user.lastname}`
+            });
         } catch (notifErr: any) {
-            console.error("Failed to notify admins via DB notification:", notifErr);
+            console.error("Failed to notify admins:", notifErr);
         }
 
         return { hostStatus: user.hostStatus };

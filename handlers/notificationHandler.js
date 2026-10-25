@@ -1,80 +1,66 @@
-const { Notification } = require("../db/mongoose");
+const { notificationService } = require("../services/notificationService");
 
-// GET MY NOTIFICATIONS
+/**
+ * GET /api/notifications
+ * Get paginated notifications for the authenticated user
+ */
 const getMyNotifications = async (req, res) => {
     try {
         const { page = 1, limit = 20, unreadOnly } = req.query;
-
-        const filter = { recipient: req.user.userId };
-        if (unreadOnly === 'true') filter.read = false;
-
-        const skip = (Number(page) - 1) * Number(limit);
-
-        const notifications = await Notification.find(filter)
-            .populate('sender', 'firstname lastname avatar')
-            .sort({ createdAt: -1 })
-            .limit(Number(limit))
-            .skip(skip);
-
-        const total = await Notification.countDocuments(filter);
-        const unreadCount = await Notification.countDocuments({ recipient: req.user.userId, read: false });
+        const result = await notificationService.getMyNotifications(req.user.userId, {
+            page,
+            limit,
+            unreadOnly
+        });
 
         return res.status(200).json({
             success: true,
-            count: notifications.length,
-            total,
-            unreadCount,
-            page: Number(page),
-            notifications
+            ...result
         });
     } catch (error) {
         console.error("Get notifications error:", error);
-        return res.status(500).json({ success: false, message: "Error fetching notifications" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error fetching notifications"
+        });
     }
 };
 
-// GET BOOKING NOTIFICATIONS SPECIFICALLY
+/**
+ * GET /api/notifications/bookings
+ * Get booking-related notifications specifically
+ */
 const getBookingNotifications = async (req, res) => {
     try {
         const { page = 1, limit = 20 } = req.query;
-        const filter = {
-            recipient: req.user.userId,
-            type: { $in: ['booking_request', 'booking_accepted', 'booking_declined', 'booking_cancelled'] }
-        };
-
-        const skip = (Number(page) - 1) * Number(limit);
-
-        const notifications = await Notification.find(filter)
-            .populate('sender', 'firstname lastname avatar')
-            .sort({ createdAt: -1 })
-            .limit(Number(limit))
-            .skip(skip);
-
-        const total = await Notification.countDocuments(filter);
-        const unreadCount = await Notification.countDocuments({ ...filter, read: false });
+        const result = await notificationService.getBookingNotifications(req.user.userId, {
+            page,
+            limit
+        });
 
         return res.status(200).json({
             success: true,
-            count: notifications.length,
-            total,
-            unreadCount,
-            page: Number(page),
-            notifications
+            ...result
         });
     } catch (error) {
         console.error("Get booking notifications error:", error);
-        return res.status(500).json({ success: false, message: "Error fetching booking notifications" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error fetching booking notifications"
+        });
     }
 };
 
-// CREATE NOTIFICATION (Internal or Debug)
+/**
+ * POST /api/notifications
+ * Create notification (Internal or Debug)
+ */
 const createNotification = async (req, res) => {
     try {
         const { recipientId, title, message, type, link } = req.body;
-
-        const notification = await Notification.create({
-            recipient: recipientId || req.user.userId, // Default to self for testing
-            sender: req.user.userId,
+        const notification = await notificationService.createNotification({
+            recipientId: recipientId || req.user.userId,
+            senderId: req.user.userId,
             title,
             message,
             type: type || 'info',
@@ -88,23 +74,20 @@ const createNotification = async (req, res) => {
         });
     } catch (error) {
         console.error("Create notification error:", error);
-        return res.status(500).json({ success: false, message: "Error creating notification" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error creating notification"
+        });
     }
 };
 
-// MARK AS READ
+/**
+ * PUT /api/notifications/:id/read
+ * Mark a single notification as read
+ */
 const markAsRead = async (req, res) => {
     try {
-        const notification = await Notification.findOneAndUpdate(
-            { _id: req.params.id, recipient: req.user.userId },
-            { read: true },
-            { new: true }
-        );
-
-        if (!notification) {
-            return res.status(404).json({ success: false, message: "Notification not found" });
-        }
-
+        const notification = await notificationService.markAsRead(req.params.id, req.user.userId);
         return res.status(200).json({
             success: true,
             message: "Marked as read",
@@ -112,103 +95,94 @@ const markAsRead = async (req, res) => {
         });
     } catch (error) {
         console.error("Mark read error:", error);
-        return res.status(500).json({ success: false, message: "Error updating notification" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error updating notification"
+        });
     }
 };
 
-// MARK ALL AS READ
+/**
+ * PUT /api/notifications/mark-all/read
+ * Mark all notifications as read for current user
+ */
 const markAllAsRead = async (req, res) => {
     try {
-        await Notification.updateMany(
-            { recipient: req.user.userId, read: false },
-            { read: true }
-        );
-
+        await notificationService.markAllAsRead(req.user.userId);
         return res.status(200).json({
             success: true,
             message: "All notifications marked as read"
         });
     } catch (error) {
         console.error("Mark all read error:", error);
-        return res.status(500).json({ success: false, message: "Error updating notifications" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error updating notifications"
+        });
     }
 };
 
-// DELETE NOTIFICATION
+/**
+ * DELETE /api/notifications/:id
+ * Delete a single notification
+ */
 const deleteNotification = async (req, res) => {
     try {
-        const notification = await Notification.findOneAndDelete({
-            _id: req.params.id,
-            recipient: req.user.userId
-        });
-
-        if (!notification) {
-            return res.status(404).json({ success: false, message: "Notification not found" });
-        }
-
+        await notificationService.deleteNotification(req.params.id, req.user.userId);
         return res.status(200).json({
             success: true,
             message: "Notification deleted"
         });
     } catch (error) {
         console.error("Delete notification error:", error);
-        return res.status(500).json({ success: false, message: "Error deleting notification" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error deleting notification"
+        });
     }
 };
 
-// CLEAR ALL
+/**
+ * DELETE /api/notifications/clear/all
+ * Clear all notifications for current user
+ */
 const clearAllNotifications = async (req, res) => {
     try {
-        await Notification.deleteMany({ recipient: req.user.userId });
-
+        await notificationService.clearAllNotifications(req.user.userId);
         return res.status(200).json({
             success: true,
             message: "Notifications cleared"
         });
     } catch (error) {
         console.error("Clear all error:", error);
-        return res.status(500).json({ success: false, message: "Error clearing notifications" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error clearing notifications"
+        });
     }
 };
 
-// GET FOLLOW NOTIFICATIONS
+/**
+ * GET /api/notifications/follows
+ * Get follow-related notifications for user
+ */
 const getFollowNotifications = async (req, res) => {
     try {
         const { page = 1, limit = 20 } = req.query;
-        const skip = (Number(page) - 1) * Number(limit);
-
-        // Filter for follow-related notifications
-        const filter = { 
-            recipient: req.user.userId,
-            type: 'follow'
-        };
-
-        const notifications = await Notification.find(filter)
-            .populate('sender', 'firstname lastname avatar description')
-            .sort({ createdAt: -1 })
-            .limit(Number(limit))
-            .skip(skip);
-
-        const total = await Notification.countDocuments(filter);
-        const unreadCount = await Notification.countDocuments({ 
-            recipient: req.user.userId, 
-            read: false,
-            type: 'follow'
+        const result = await notificationService.getFollowNotifications(req.user.userId, {
+            page,
+            limit
         });
 
         return res.status(200).json({
             success: true,
-            count: notifications.length,
-            total,
-            unreadCount,
-            page: Number(page),
-            notifications
+            ...result
         });
     } catch (error) {
         console.error("Get follow notifications error:", error);
-        return res.status(500).json({ 
-            success: false, 
-            message: "Error fetching follow notifications" 
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error fetching follow notifications"
         });
     }
 };

@@ -72,16 +72,16 @@ export class BookingService {
     }
 
     // --- Booking Creation & Payment Lifecycle ---
-    public async createBooking(data: CreateBookingInput, userId: string, userRole: string, io?: any): Promise<any> {
-        return this.creationService.createBooking(data, userId, userRole, io);
+    public async createBooking(data: CreateBookingInput, userId: string, userRole: string): Promise<any> {
+        return this.creationService.createBooking(data, userId, userRole);
     }
 
-    public async verifyPayment(data: VerifyPaymentInput, userId: string, io?: any): Promise<any> {
-        return this.creationService.verifyPayment(data, userId, io);
+    public async verifyPayment(data: VerifyPaymentInput, userId: string): Promise<any> {
+        return this.creationService.verifyPayment(data, userId);
     }
 
-    public async processBookingConfirmation(booking: any, io?: any): Promise<any> {
-        return this.creationService.processBookingConfirmation(booking, io);
+    public async processBookingConfirmation(booking: any): Promise<any> {
+        return this.creationService.processBookingConfirmation(booking);
     }
 
     // --- Booking Queries ---
@@ -98,20 +98,20 @@ export class BookingService {
     }
 
     // --- Host & Status Actions ---
-    public async acceptBooking(bookingId: string, hostId: string, hostResponse?: string, io?: any): Promise<any> {
-        return this.actionService.acceptBooking(bookingId, hostId, hostResponse, io);
+    public async acceptBooking(bookingId: string, hostId: string, hostResponse?: string): Promise<any> {
+        return this.actionService.acceptBooking(bookingId, hostId, hostResponse);
     }
 
-    public async declineBooking(bookingId: string, hostId: string, hostResponse?: string, io?: any): Promise<any> {
-        return this.actionService.declineBooking(bookingId, hostId, hostResponse, io);
+    public async declineBooking(bookingId: string, hostId: string, hostResponse?: string): Promise<any> {
+        return this.actionService.declineBooking(bookingId, hostId, hostResponse);
     }
 
-    public async requestCancellation(bookingId: string, guestId: string, reason?: string, io?: any): Promise<any> {
-        return this.actionService.requestCancellation(bookingId, guestId, reason, io);
+    public async requestCancellation(bookingId: string, guestId: string, reason?: string): Promise<any> {
+        return this.actionService.requestCancellation(bookingId, guestId, reason);
     }
 
-    public async approveCancellation(bookingId: string, hostId: string, io?: any): Promise<any> {
-        return this.actionService.approveCancellation(bookingId, hostId, io);
+    public async approveCancellation(bookingId: string, hostId: string): Promise<any> {
+        return this.actionService.approveCancellation(bookingId, hostId);
     }
 
     // --- Journey OTP Operations ---
@@ -119,25 +119,25 @@ export class BookingService {
         return this.actionService.sendStartOTP(bookingId, hostId);
     }
 
-    public async verifyStartOTP(bookingId: string, hostId: string, otp: string, io?: any): Promise<any> {
-        return this.actionService.verifyStartOTP(bookingId, hostId, otp, io);
+    public async verifyStartOTP(bookingId: string, hostId: string, otp: string): Promise<any> {
+        return this.actionService.verifyStartOTP(bookingId, hostId, otp);
     }
 
     public async sendCompletionOTP(bookingId: string, hostId: string): Promise<any> {
         return this.actionService.sendCompletionOTP(bookingId, hostId);
     }
 
-    public async verifyCompletionOTP(bookingId: string, hostId: string, otp: string, io?: any): Promise<any> {
-        return this.actionService.verifyCompletionOTP(bookingId, hostId, otp, io);
+    public async verifyCompletionOTP(bookingId: string, hostId: string, otp: string): Promise<any> {
+        return this.actionService.verifyCompletionOTP(bookingId, hostId, otp);
     }
 
     // --- Orphaned Invite Bookings ---
-    public async acceptOrphanedBooking(bookingId: string, hostId: string, io?: any): Promise<any> {
-        return this.actionService.acceptOrphanedBooking(bookingId, hostId, io);
+    public async acceptOrphanedBooking(bookingId: string, hostId: string): Promise<any> {
+        return this.actionService.acceptOrphanedBooking(bookingId, hostId);
     }
 
-    public async rejectOrphanedBooking(bookingId: string, hostId: string, io?: any): Promise<any> {
-        return this.actionService.rejectOrphanedBooking(bookingId, hostId, io);
+    public async rejectOrphanedBooking(bookingId: string, hostId: string): Promise<any> {
+        return this.actionService.rejectOrphanedBooking(bookingId, hostId);
     }
 }
 

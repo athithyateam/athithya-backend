@@ -71,8 +71,6 @@ exports.submitHostVerification = async (req, res) => {
             }
         }
 
-        const io = req.app.get("io");
-
         const result = await verificationService.submitHostVerification(
             userId,
             {
@@ -84,8 +82,7 @@ exports.submitHostVerification = async (req, res) => {
                 state,
                 yearsOfExperience,
                 aadhaarCardData
-            },
-            io
+            }
         );
 
         return res.status(200).json({

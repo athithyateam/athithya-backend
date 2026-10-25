@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const { User, Post, HostPersonalMedia } = require("../../db/mongoose");
 const { deleteFile } = require("../../services/storageService");
+const { notificationService } = require("../../services/notificationService");
 
 exports.getHostGridMedia = async (req, res) => {
     try {
@@ -105,14 +106,11 @@ exports.updateGridTabPreference = async (req, res) => {
             { new: true }
         ).select("activeGridTab");
 
-        // Broadcast real-time grid tab preference update via Socket.io
-        const io = req.app.get("io");
-        if (io) {
-            io.emit("host_grid_tab_updated", {
-                hostId: userId,
-                activeGridTab: user.activeGridTab
-            });
-        }
+        // Broadcast real-time grid tab preference update via NotificationService
+        notificationService.emitToAll("host_grid_tab_updated", {
+            hostId: userId,
+            activeGridTab: user.activeGridTab
+        });
 
         return res.status(200).json({
             success: true,

@@ -7,11 +7,9 @@ const { profileService } = require("../../services/users/profileService");
  */
 exports.updateProfile = async (req, res) => {
     try {
-        const io = req.app.get("io");
         const result = await profileService.updateProfile(
             req.user.userId,
-            req.body,
-            io
+            req.body
         );
 
         return res.status(200).json({

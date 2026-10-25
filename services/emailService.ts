@@ -204,27 +204,47 @@ export class EmailService {
     public async sendHtmlEmail(email: string, subject: string, htmlContent: string): Promise<any> {
         return await this.sendEmail(email, subject, htmlContent);
     }
+
+    /**
+     * Render a branded Athithya HTML email layout
+     */
+    public renderBrandedEmail(title: string, bodyHtml: string, subtitle?: string): string {
+        return `
+        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; background-color: #ffffff;">
+            <div style="background-color: #1a1a1a; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+                <h1 style="color: #C59A2F; margin: 0; font-size: 26px; letter-spacing: 2px;">ATHITHYA</h1>
+                ${subtitle ? `<p style="color: #fff; margin: 5px 0 0 0; font-size: 14px; text-transform: uppercase;">${subtitle}</p>` : ""}
+            </div>
+            <div style="padding: 24px;">
+                <h2 style="color: #1a1a1a; margin-top: 0; font-size: 20px;">${title}</h2>
+                ${bodyHtml}
+                <p style="color: #6b7280; font-size: 14px; margin-top: 30px; border-top: 1px solid #f3f4f6; padding-top: 15px;">
+                    Best regards,<br>
+                    <strong style="color: #111827;">The Athithya Team</strong>
+                </p>
+            </div>
+            <div style="background-color: #f9fafb; padding: 15px; border-radius: 0 0 8px 8px; text-align: center; border-top: 1px solid #f3f4f6;">
+                <p style="color: #9ca3af; font-size: 12px; margin: 0;">&copy; ${new Date().getFullYear()} Athithya. All rights reserved.</p>
+            </div>
+        </div>
+        `;
+    }
 }
 
 export const emailService = EmailService.getInstance();
 export default EmailService;
 
 // Convenience function exports for backward compatibility
-export const generateOTP = (length?: number) => emailService.generateOTP(length);
-export const renderTemplate = (templateName: string, data?: Record<string, any>) => emailService.renderTemplate(templateName, data);
-export const sendEmail = (...args: any[]) => (emailService as any).sendEmail(...args);
-export const sendTemplateEmail = (...args: any[]) => (emailService as any).sendTemplateEmail(...args);
-export const sendOTPEmail = (email: string, otp: string, subject?: string, title?: string) => emailService.sendOTPEmail(email, otp, subject, title);
-export const sendHtmlEmail = (email: string, subject: string, htmlContent: string) => emailService.sendHtmlEmail(email, subject, htmlContent);
+export const generateOTP = emailService.generateOTP.bind(emailService);
+export const renderTemplate = emailService.renderTemplate.bind(emailService);
+export const renderBrandedEmail = emailService.renderBrandedEmail.bind(emailService);
+export const sendEmail = emailService.sendEmail.bind(emailService);
+export const sendTemplateEmail = emailService.sendTemplateEmail.bind(emailService);
+export const sendOTPEmail = emailService.sendOTPEmail.bind(emailService);
+export const sendHtmlEmail = emailService.sendHtmlEmail.bind(emailService);
 
 // CommonJS compatibility
 module.exports = emailService;
 module.exports.EmailService = EmailService;
 module.exports.emailService = emailService;
-module.exports.generateOTP = generateOTP;
-module.exports.renderTemplate = renderTemplate;
-module.exports.sendEmail = sendEmail;
-module.exports.sendTemplateEmail = sendTemplateEmail;
-module.exports.sendOTPEmail = sendOTPEmail;
-module.exports.sendHtmlEmail = sendHtmlEmail;
 module.exports.default = EmailService;

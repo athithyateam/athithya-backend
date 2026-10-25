@@ -78,6 +78,10 @@ const io = new Server(server, {
 });
 app.set("io", io);
 
+// Register Socket.io instance with centralized NotificationService
+const { notificationService } = require("./services/notificationService");
+notificationService.setIo(io);
+
 // Trust proxy for Vercel / reverse proxy deployments to correctly identify client IPs
 app.set("trust proxy", 1);
 
@@ -233,7 +237,7 @@ if (shouldListen) {
 
      // Start periodic background tasks for expired group bookings
      const { checkExpiredSchedules } = require("./utils/bookingCleanup");
-     setInterval(() => checkExpiredSchedules(io), 60 * 1000);
+     setInterval(() => checkExpiredSchedules(), 60 * 1000);
      console.log(`[CLEANUP] Periodic 1-hour booking expiration scheduler started (interval: 60s)`);
   });
 } else {

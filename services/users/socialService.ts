@@ -1,5 +1,5 @@
 const { User, Notification, Conversation, Message } = require("../../db/mongoose");
-const { sendPlatformNotification } = require("../../utils/notificationHelper");
+import { notificationService } from "../notificationService";
 
 export class SocialService {
     private static instance: SocialService | null = null;
@@ -9,7 +9,7 @@ export class SocialService {
     private notificationModel: any;
     private conversationModel: any;
     private messageModel: any;
-    private notificationSender: (io: any, payload: any) => Promise<any>;
+    private notificationSvc: any;
 
     constructor(
         instanceKey: symbol,
@@ -17,7 +17,7 @@ export class SocialService {
         notificationModel: any = Notification,
         conversationModel: any = Conversation,
         messageModel: any = Message,
-        notificationSender: (io: any, payload: any) => Promise<any> = sendPlatformNotification
+        notificationSvc: any = notificationService
     ) {
         if (instanceKey !== SocialService.instanceKey) {
             throw new Error("Please use SocialService.getInstance() to retrieve or create an instance");
@@ -26,7 +26,7 @@ export class SocialService {
         this.notificationModel = notificationModel;
         this.conversationModel = conversationModel;
         this.messageModel = messageModel;
-        this.notificationSender = notificationSender;
+        this.notificationSvc = notificationSvc;
     }
 
     public static getInstance(
@@ -34,7 +34,7 @@ export class SocialService {
         notificationModel?: any,
         conversationModel?: any,
         messageModel?: any,
-        notificationSender?: (io: any, payload: any) => Promise<any>
+        notificationSvc?: any
     ): SocialService {
         if (!this.instance) {
             this.instance = new SocialService(
@@ -43,7 +43,7 @@ export class SocialService {
                 notificationModel,
                 conversationModel,
                 messageModel,
-                notificationSender
+                notificationSvc || notificationService
             );
         }
         return this.instance;
@@ -52,7 +52,7 @@ export class SocialService {
     /**
      * Service: Send friend request
      */
-    public async sendFriendRequest(targetUserId: string, currentUserId: string, io: any = null): Promise<boolean> {
+    public async sendFriendRequest(targetUserId: string, currentUserId: string): Promise<boolean> {
         if (targetUserId === currentUserId) {
             const error: any = new Error("Can't friend yourself");
             error.statusCode = 400;
@@ -87,9 +87,9 @@ export class SocialService {
 
         await this.userModel.findByIdAndUpdate(targetUserId, { $addToSet: { friendRequests: currentUserId } });
 
-        await this.notificationSender(io, {
-            recipientId: targetUserId,
-            senderId: currentUserId,
+        await this.notificationSvc.sendNotification({
+            recipient: targetUserId,
+            sender: currentUserId,
             title: "Friend Request",
             message: `${currentUser.firstname} wants to be friends`,
             type: "friend_request",
@@ -97,18 +97,16 @@ export class SocialService {
             metadata: { userId: currentUserId }
         });
 
-        if (io) {
-            io.to(targetUserId.toString()).emit("social_status_updated", {
-                requesterId: currentUserId,
-                targetId: targetUserId,
-                status: "requested"
-            });
-            io.to(currentUserId.toString()).emit("social_status_updated", {
-                requesterId: currentUserId,
-                targetId: targetUserId,
-                status: "requested"
-            });
-        }
+        this.notificationSvc.emitToUser(targetUserId, "social_status_updated", {
+            requesterId: currentUserId,
+            targetId: targetUserId,
+            status: "requested"
+        });
+        this.notificationSvc.emitToUser(currentUserId, "social_status_updated", {
+            requesterId: currentUserId,
+            targetId: targetUserId,
+            status: "requested"
+        });
 
         return true;
     }
@@ -116,7 +114,7 @@ export class SocialService {
     /**
      * Service: Accept friend request
      */
-    public async acceptFriendRequest(requesterId: string, currentUserId: string, io: any = null): Promise<boolean> {
+    public async acceptFriendRequest(requesterId: string, currentUserId: string): Promise<boolean> {
         const currentUser = await this.userModel.findById(currentUserId);
         if (!currentUser || !currentUser.friendRequests?.some((id: any) => id.toString() === requesterId)) {
             const error: any = new Error("No request found");
@@ -145,13 +143,13 @@ export class SocialService {
             { new: true }
         );
 
-        if (io && updatedNotif) {
-            io.to(currentUserId.toString()).emit("notification_updated", updatedNotif);
+        if (updatedNotif) {
+            this.notificationSvc.emitToUser(currentUserId, "notification_updated", updatedNotif);
         }
 
-        await this.notificationSender(io, {
-            recipientId: requesterId,
-            senderId: currentUserId,
+        await this.notificationSvc.sendNotification({
+            recipient: requesterId,
+            sender: currentUserId,
             title: "Friend Request Accepted",
             message: `${currentUser.firstname} accepted your request`,
             type: "friend_accepted",
@@ -159,18 +157,16 @@ export class SocialService {
             metadata: { userId: currentUserId }
         });
 
-        if (io) {
-            io.to(requesterId.toString()).emit("social_status_updated", {
-                requesterId,
-                targetId: currentUserId,
-                status: "friends"
-            });
-            io.to(currentUserId.toString()).emit("social_status_updated", {
-                requesterId,
-                targetId: currentUserId,
-                status: "friends"
-            });
-        }
+        this.notificationSvc.emitToUser(requesterId, "social_status_updated", {
+            requesterId,
+            targetId: currentUserId,
+            status: "friends"
+        });
+        this.notificationSvc.emitToUser(currentUserId, "social_status_updated", {
+            requesterId,
+            targetId: currentUserId,
+            status: "friends"
+        });
 
         return true;
     }
@@ -178,7 +174,7 @@ export class SocialService {
     /**
      * Service: Reject friend request
      */
-    public async rejectFriendRequest(requesterId: string, currentUserId: string, io: any = null): Promise<boolean> {
+    public async rejectFriendRequest(requesterId: string, currentUserId: string): Promise<boolean> {
         await this.userModel.findByIdAndUpdate(currentUserId, { $pull: { friendRequests: requesterId } });
 
         const requester = await this.userModel.findById(requesterId).select("firstname lastname");
@@ -196,22 +192,20 @@ export class SocialService {
             { new: true }
         );
 
-        if (io && updatedNotif) {
-            io.to(currentUserId.toString()).emit("notification_updated", updatedNotif);
+        if (updatedNotif) {
+            this.notificationSvc.emitToUser(currentUserId, "notification_updated", updatedNotif);
         }
 
-        if (io) {
-            io.to(requesterId.toString()).emit("social_status_updated", {
-                requesterId,
-                targetId: currentUserId,
-                status: "none"
-            });
-            io.to(currentUserId.toString()).emit("social_status_updated", {
-                requesterId,
-                targetId: currentUserId,
-                status: "none"
-            });
-        }
+        this.notificationSvc.emitToUser(requesterId, "social_status_updated", {
+            requesterId,
+            targetId: currentUserId,
+            status: "none"
+        });
+        this.notificationSvc.emitToUser(currentUserId, "social_status_updated", {
+            requesterId,
+            targetId: currentUserId,
+            status: "none"
+        });
 
         return true;
     }
@@ -219,7 +213,7 @@ export class SocialService {
     /**
      * Service: Unfriend user and clear direct conversation
      */
-    public async unfriend(targetUserId: string, currentUserId: string, io: any = null): Promise<boolean> {
+    public async unfriend(targetUserId: string, currentUserId: string): Promise<boolean> {
         await this.userModel.findByIdAndUpdate(currentUserId, { $pull: { friends: targetUserId } });
         await this.userModel.findByIdAndUpdate(targetUserId, { $pull: { friends: currentUserId, friendRequests: currentUserId } });
 
@@ -233,18 +227,16 @@ export class SocialService {
             await this.conversationModel.deleteOne({ _id: conversation._id });
         }
 
-        if (io) {
-            io.to(targetUserId.toString()).emit("social_status_updated", {
-                requesterId: currentUserId,
-                targetId: targetUserId,
-                status: "none"
-            });
-            io.to(currentUserId.toString()).emit("social_status_updated", {
-                requesterId: currentUserId,
-                targetId: targetUserId,
-                status: "none"
-            });
-        }
+        this.notificationSvc.emitToUser(targetUserId, "social_status_updated", {
+            requesterId: currentUserId,
+            targetId: targetUserId,
+            status: "none"
+        });
+        this.notificationSvc.emitToUser(currentUserId, "social_status_updated", {
+            requesterId: currentUserId,
+            targetId: targetUserId,
+            status: "none"
+        });
 
         return true;
     }

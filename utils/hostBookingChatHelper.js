@@ -1,4 +1,5 @@
 const { User, Conversation, Message, Booking } = require("../db/mongoose");
+const { notificationService } = require("../services/notificationService");
 
 /**
  * Automatically sends a welcome DM from the Host to the Guest upon successful booking:
@@ -68,7 +69,7 @@ async function triggerHostBookingWelcome(req, booking) {
         });
 
         // Broadcast Socket.io realtime events if active
-        const io = req?.app?.get("io");
+        const io = notificationService.getIo() || req?.app?.get("io") || req?.io;
         if (io) {
             const populatedMsg = {
                 ...message.toObject(),
