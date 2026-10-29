@@ -29,6 +29,7 @@ import {
     buildCategoryFilter,
     attachDistanceToTreks,
     getPlatformFeeRate,
+    recordHostAuditLog,
     recordHostHistory
 } from "./posts/postPayloadParser";
 
@@ -57,6 +58,7 @@ export {
     buildCategoryFilter,
     attachDistanceToTreks,
     getPlatformFeeRate,
+    recordHostAuditLog,
     recordHostHistory
 };
 
@@ -211,5 +213,6 @@ module.exports.expandCategories = expandCategories;
 module.exports.buildCategoryFilter = buildCategoryFilter;
 module.exports.attachDistanceToTreks = attachDistanceToTreks;
 module.exports.getPlatformFeeRate = getPlatformFeeRate;
+module.exports.recordHostAuditLog = recordHostAuditLog;
 module.exports.recordHostHistory = recordHostHistory;
 module.exports.default = PostService;

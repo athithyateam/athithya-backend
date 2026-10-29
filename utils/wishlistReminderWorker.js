@@ -1,19 +1,19 @@
-const { GuestSchedule } = require("../db/mongoose");
+const { WishlistSchedule } = require("../db/mongoose");
 const { sendHtmlEmail } = require("./emailService");
 const { notificationService } = require("../services/notificationService");
 
 /**
- * Periodically check for due guest experience schedules, send in-app bell
+ * Periodically check for due wishlist scheduled reminders, send in-app bell
  * notifications and emails, and auto-delete completed schedule records.
  *
  * @param {Object} [app] - Optional Express app instance
  */
-function startScheduleReminderWorker(app) {
+function startWishlistReminderWorker(app) {
     // Run worker every 30 seconds
     setInterval(async () => {
         try {
             const now = new Date();
-            const dueSchedules = await GuestSchedule.find({
+            const dueSchedules = await WishlistSchedule.find({
                 status: 'scheduled',
                 scheduledDateTime: { $lte: now }
             })
@@ -24,7 +24,7 @@ function startScheduleReminderWorker(app) {
 
             for (const sch of dueSchedules) {
                 if (!sch.user || !sch.post) {
-                    await GuestSchedule.findByIdAndDelete(sch._id);
+                    await WishlistSchedule.findByIdAndDelete(sch._id);
                     continue;
                 }
 
@@ -86,12 +86,14 @@ function startScheduleReminderWorker(app) {
                 }
 
                 // 3. Auto-Cleanup: Delete the schedule record as reminder has been delivered
-                await GuestSchedule.findByIdAndDelete(sch._id);
+                await WishlistSchedule.findByIdAndDelete(sch._id);
             }
         } catch (err) {
-            console.error("Error in scheduleReminderWorker:", err);
+            console.error("Error in wishlistReminderWorker:", err);
         }
     }, 30000); // 30 seconds interval
 }
 
-module.exports = { startScheduleReminderWorker };
+module.exports = {
+    startWishlistReminderWorker
+};

@@ -1,4 +1,4 @@
-const { User, Post, Review, Booking, Notification, CommunityPost, Conversation, Message } = require("../../db/mongoose");
+const { User, HostDetails, HostAuditLog, Post, Review, Booking, Notification, CommunityPost, Conversation, Message, Friendship, FriendRequest, SavedPost, HostPinnedExperienceMedia, WishlistSchedule } = require("../../db/mongoose");
 const { deleteFromS3 } = require("../../services/storageService");
 const { profileService } = require("../../services/users/profileService");
 
@@ -207,15 +207,16 @@ exports.deleteMyAccount = async (req, res) => {
         }
 
         // 2. Delete Host Documents (Aadhaar) from S3
-        if (user.hostDetails?.aadhaarCard) {
-            if (Array.isArray(user.hostDetails.aadhaarCard)) {
-                for (const doc of user.hostDetails.aadhaarCard) {
+        const hostDoc = await HostDetails.findOne({ user: userId });
+        if (hostDoc?.aadhaarCard) {
+            if (Array.isArray(hostDoc.aadhaarCard)) {
+                for (const doc of hostDoc.aadhaarCard) {
                     if (doc.public_id) {
                         try { await deleteFromS3(doc.public_id); } catch (err) {}
                     }
                 }
-            } else if (user.hostDetails.aadhaarCard.public_id) {
-                try { await deleteFromS3(user.hostDetails.aadhaarCard.public_id); } catch (err) {}
+            } else if (hostDoc.aadhaarCard.public_id) {
+                try { await deleteFromS3(hostDoc.aadhaarCard.public_id); } catch (err) {}
             }
         }
 
@@ -291,11 +292,16 @@ exports.deleteMyAccount = async (req, res) => {
         }
         await Conversation.deleteMany({ participants: userId });
 
-        // 10. Remove user from all friends' lists and request lists
-        await User.updateMany(
-            { $or: [{ friends: userId }, { friendRequests: userId }] },
-            { $pull: { friends: userId, friendRequests: userId } }
-        );
+        // 10. Clean up user's social connections, requests, bookmarks, pins, wishlist schedules, and host records
+        await Promise.all([
+            Friendship.deleteMany({ $or: [{ user: userId }, { friend: userId }] }),
+            FriendRequest.deleteMany({ $or: [{ sender: userId }, { recipient: userId }] }),
+            SavedPost.deleteMany({ user: userId }),
+            HostPinnedExperienceMedia.deleteMany({ user: userId }),
+            WishlistSchedule.deleteMany({ user: userId }),
+            HostDetails.deleteOne({ user: userId }),
+            HostAuditLog.deleteMany({ hostId: userId })
+        ]);
 
         // 11. Finally, delete the user record
         await User.findByIdAndDelete(userId);

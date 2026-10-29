@@ -11,46 +11,6 @@ const userSchema = new mongoose.Schema({
         default: 'guest',
         required: true
     },
-    hostStatus: {
-        type: String,
-        enum: ['pending_verification', 'pending_approval', 'approved', 'rejected'],
-        default: 'pending_verification'
-    },
-    hostDetails: {
-        yearsOfExperience: { type: Number, default: 0, min: 0, max: 30 },
-        phone: { type: String },
-        phoneVerified: { type: Boolean, default: false },
-        tempVerifiedPhone: { type: String },
-        physicalAddress: { type: String },
-        pincode: { type: String },
-        city: { type: String },
-        district: { type: String },
-        state: { type: String },
-        aadhaarCard: [{
-            url: { type: String },
-            public_id: { type: String }
-        }]
-    },
-    pendingHostDetails: {
-        firstname: { type: String },
-        lastname: { type: String },
-        description: { type: String },
-        avatar: {
-            url: { type: String },
-            public_id: { type: String }
-        },
-        yearsOfExperience: { type: Number, default: 0, min: 0, max: 30 },
-        phone: { type: String },
-        physicalAddress: { type: String },
-        pincode: { type: String },
-        city: { type: String },
-        district: { type: String },
-        state: { type: String },
-        aadhaarCard: [{
-            url: { type: String },
-            public_id: { type: String }
-        }]
-    },
     isVerified: { type: Boolean, default: false },
     avatar: {
         url: { type: String },
@@ -58,8 +18,6 @@ const userSchema = new mongoose.Schema({
         googleDriveFileId: { type: String }
     },
     description: { type: String, maxlength: 2000 },
-    otp: { type: String },
-    otpExpires: { type: Date },
     location: {
         latitude: { type: Number },
         longitude: { type: Number },
@@ -69,22 +27,8 @@ const userSchema = new mongoose.Schema({
         country: { type: String, trim: true },
         lastUpdated: { type: Date }
     },
-    friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }],
-    friendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }],
-    savedPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'post' }],
     interests: [{ type: String }],
-    walletBalance: { type: Number, default: 0 },
-    verifyBadge: {
-        enabled: { type: Boolean, default: false },
-        requiredBookings: { type: Number, default: 1 },
-        successfulBookingsCount: { type: Number, default: 0 }
-    },
-    pinnedExperienceMedia: [{ type: String }],
-    activeGridTab: {
-        type: String,
-        enum: ["experience", "personal"],
-        default: "experience"
-    }
+    walletBalance: { type: Number, default: 0 }
 }, { timestamps: true });
 
 userSchema.index({ role: 1 });

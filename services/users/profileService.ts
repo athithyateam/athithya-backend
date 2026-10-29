@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
-import { User, Post, Review, Notification, HostHistory } from "../../db/mongoose";
+import { User, Post, Review, Notification, HostDetails, HostAuditLog, Friendship, FriendRequest, SavedPost } from "../../db/mongoose";
 import { deleteFile } from "../storageService";
-import { parseIfJson, recordHostHistory } from "../posts/postPayloadParser";
+import { parseIfJson, recordHostAuditLog } from "../posts/postPayloadParser";
 import { sendTemplateEmail } from "../emailService";
 import { notificationService } from "../notificationService";
 import { normalizePhoneNumber, renderDocumentListHtml } from "./verificationService";
@@ -23,7 +23,11 @@ export class ProfileService {
     private postModel: any;
     private reviewModel: any;
     private notificationModel: any;
-    private hostHistoryModel: any;
+    private hostDetailsModel: any;
+    private hostAuditLogModel: any;
+    private friendshipModel: any;
+    private friendRequestModel: any;
+    private savedPostModel: any;
     private fileDeleter: (key: string) => Promise<any>;
     private emailNotifier: (options: any) => Promise<any>;
 
@@ -33,7 +37,11 @@ export class ProfileService {
         postModel: any = Post,
         reviewModel: any = Review,
         notificationModel: any = Notification,
-        hostHistoryModel: any = HostHistory,
+        hostDetailsModel: any = HostDetails,
+        hostAuditLogModel: any = HostAuditLog,
+        friendshipModel: any = Friendship,
+        friendRequestModel: any = FriendRequest,
+        savedPostModel: any = SavedPost,
         fileDeleter: (key: string) => Promise<any> = deleteFile,
         emailNotifier: (options: any) => Promise<any> = sendTemplateEmail
     ) {
@@ -44,7 +52,11 @@ export class ProfileService {
         this.postModel = postModel;
         this.reviewModel = reviewModel;
         this.notificationModel = notificationModel;
-        this.hostHistoryModel = hostHistoryModel;
+        this.hostDetailsModel = hostDetailsModel;
+        this.hostAuditLogModel = hostAuditLogModel;
+        this.friendshipModel = friendshipModel;
+        this.friendRequestModel = friendRequestModel;
+        this.savedPostModel = savedPostModel;
         this.fileDeleter = fileDeleter;
         this.emailNotifier = emailNotifier;
     }
@@ -54,20 +66,28 @@ export class ProfileService {
         postModel?: any,
         reviewModel?: any,
         notificationModel?: any,
-        hostHistoryModel?: any,
+        hostDetailsModel?: any,
+        hostAuditLogModel?: any,
+        friendshipModel?: any,
+        friendRequestModel?: any,
+        savedPostModel?: any,
         fileDeleter?: (key: string) => Promise<any>,
         emailNotifier?: (options: any) => Promise<any>
     ): ProfileService {
         if (!this.instance) {
             this.instance = new ProfileService(
                 this.instanceKey,
-                userModel,
-                postModel,
-                reviewModel,
-                notificationModel,
-                hostHistoryModel,
-                fileDeleter,
-                emailNotifier
+                userModel || User,
+                postModel || Post,
+                reviewModel || Review,
+                notificationModel || Notification,
+                hostDetailsModel || HostDetails,
+                hostAuditLogModel || HostAuditLog,
+                friendshipModel || Friendship,
+                friendRequestModel || FriendRequest,
+                savedPostModel || SavedPost,
+                fileDeleter || deleteFile,
+                emailNotifier || sendTemplateEmail
             );
         }
         return this.instance;
@@ -88,15 +108,20 @@ export class ProfileService {
     }
 
     /**
-     * Helper: Determine mutual friendship and pending request status
+     * Helper: Determine mutual friendship and pending request status via indexed collections
      */
-    private getFriendshipStatus(user: any, currentUserIdStr?: string): { isFriend: boolean; isRequestedFriend: boolean } {
-        if (!currentUserIdStr || user._id.toString() === currentUserIdStr) {
+    private async getFriendshipStatus(user: any, currentUserIdStr?: string): Promise<{ isFriend: boolean; isRequestedFriend: boolean }> {
+        const targetUserIdStr = (user._id || user).toString();
+        if (!currentUserIdStr || targetUserIdStr === currentUserIdStr) {
             return { isFriend: false, isRequestedFriend: false };
         }
-        const isFriend = (user.friends || []).some((id: any) => id && id.toString() === currentUserIdStr);
-        const isRequestedFriend = (user.friendRequests || []).some((id: any) => id && id.toString() === currentUserIdStr);
-        return { isFriend, isRequestedFriend };
+        const isFriend = await this.friendshipModel.exists({ user: currentUserIdStr, friend: targetUserIdStr });
+        const isRequestedFriend = await this.friendRequestModel.exists({
+            sender: currentUserIdStr,
+            recipient: targetUserIdStr,
+            status: "pending"
+        });
+        return { isFriend: !!isFriend, isRequestedFriend: !!isRequestedFriend };
     }
 
     /**
@@ -146,27 +171,30 @@ export class ProfileService {
     }
 
     /**
-     * Record host's previous details to HostHistory collection (scoped per host)
+     * Record host's previous details to HostAuditLog collection (scoped per host)
      */
     public async saveHostOldDetails(user: any, changedFields: string[] = []): Promise<void> {
         if (!user || user.role !== "host") return;
+        const hostDetails = await this.hostDetailsModel.findOne({ user: user._id });
         const hostName = `${user.firstname} ${user.lastname}`;
-        await recordHostHistory(
-            this.hostHistoryModel,
+        await recordHostAuditLog(
+            this.hostAuditLogModel,
             {
                 type: "profile_update",
                 hostId: user._id,
                 hostName: hostName,
                 changedFields: changedFields,
-                avatarUrl: user.avatar?.url || "",
-                physicalAddress: user.hostDetails?.physicalAddress || "",
-                city: user.hostDetails?.city || "",
-                district: user.hostDetails?.district || "",
-                state: user.hostDetails?.state || "",
-                pincode: user.hostDetails?.pincode || "",
-                phone: user.hostDetails?.phone || "",
-                email: user.email || "",
-                aadhaarCard: user.hostDetails?.aadhaarCard || []
+                snapshot: {
+                    avatarUrl: user.avatar?.url || "",
+                    physicalAddress: hostDetails?.physicalAddress || "",
+                    city: hostDetails?.city || "",
+                    district: hostDetails?.district || "",
+                    state: hostDetails?.state || "",
+                    pincode: hostDetails?.pincode || "",
+                    phone: hostDetails?.phone || "",
+                    email: user.email || "",
+                    aadhaarCard: hostDetails?.aadhaarCard || []
+                }
             },
             { hostId: user._id, type: "profile_update" },
             10
@@ -176,21 +204,36 @@ export class ProfileService {
     /**
      * Format user response fields based on requester authorization
      */
-    public getUserFields(user: any, isOwnProfileOrAdmin: boolean = false): any {
-        let hostDetails = user.hostDetails
-            ? (typeof user.hostDetails.toObject === 'function' ? user.hostDetails.toObject() : JSON.parse(JSON.stringify(user.hostDetails)))
-            : undefined;
-        let pendingHostDetails = user.pendingHostDetails
-            ? (typeof user.pendingHostDetails.toObject === 'function' ? user.pendingHostDetails.toObject() : JSON.parse(JSON.stringify(user.pendingHostDetails)))
-            : undefined;
+    public async getUserFields(user: any, isOwnProfileOrAdmin: boolean = false): Promise<any> {
+        let hostStatus: string | undefined = undefined;
+        let hostDetails: any = undefined;
+        let pendingHostDetails: any = undefined;
 
-        if (!isOwnProfileOrAdmin) {
-            if (hostDetails) {
-                delete hostDetails.aadhaarCard;
+        if (user.role === "host") {
+            const hostDoc = await this.hostDetailsModel.findOne({ user: user._id });
+            if (hostDoc) {
+                hostStatus = hostDoc.status;
+                hostDetails = hostDoc.toObject ? hostDoc.toObject() : JSON.parse(JSON.stringify(hostDoc));
+                pendingHostDetails = hostDoc.pendingHostDetails
+                    ? (typeof hostDoc.pendingHostDetails.toObject === 'function' ? hostDoc.pendingHostDetails.toObject() : JSON.parse(JSON.stringify(hostDoc.pendingHostDetails)))
+                    : undefined;
+
+                if (!isOwnProfileOrAdmin) {
+                    if (hostDetails) {
+                        delete hostDetails.aadhaarCard;
+                    }
+                    if (pendingHostDetails) {
+                        delete pendingHostDetails.aadhaarCard;
+                    }
+                }
             }
-            if (pendingHostDetails) {
-                delete pendingHostDetails.aadhaarCard;
-            }
+        }
+
+        const friendsCount = await this.friendshipModel.countDocuments({ user: user._id });
+        let savedPosts: any[] | undefined = undefined;
+        if (isOwnProfileOrAdmin) {
+            const saved = await this.savedPostModel.find({ user: user._id }).select('post');
+            savedPosts = saved.map((s: any) => s.post);
         }
 
         return {
@@ -203,15 +246,15 @@ export class ProfileService {
             avatar: user.avatar,
             description: user.description,
             isVerified: user.isVerified,
-            hostStatus: user.hostStatus,
+            hostStatus: hostStatus,
             hostDetails: hostDetails,
             pendingHostDetails: pendingHostDetails,
             location: user.location,
-            activeGridTab: user.activeGridTab || "experience",
-            friendsCount: (user.friends || []).filter(Boolean).length,
+            activeGridTab: "experience",
+            friendsCount,
             interests: user.interests || [],
             walletBalance: isOwnProfileOrAdmin ? (user.walletBalance || 0) : undefined,
-            savedPosts: isOwnProfileOrAdmin ? (user.savedPosts || []) : undefined,
+            savedPosts,
             createdAt: user.createdAt,
             updatedAt: user.updatedAt
         };
@@ -221,7 +264,7 @@ export class ProfileService {
      * Service: Fetch a user by ID
      */
     public async getUserById(targetUserId: string, currentUserId?: string, currentUserRole?: string): Promise<any> {
-        const user = await this.userModel.findById(targetUserId).select('-password -otp -otpExpires');
+        const user = await this.userModel.findById(targetUserId).select('-password');
         if (!user) {
             const error: any = new Error("User not found");
             error.statusCode = 404;
@@ -230,9 +273,9 @@ export class ProfileService {
 
         const currentUserIdStr = currentUserId?.toString();
         const isOwnProfileOrAdmin = !!(currentUserIdStr && (currentUserIdStr === targetUserId || currentUserRole === 'admin'));
-        const { isFriend: isFollowing, isRequestedFriend: isRequested } = this.getFriendshipStatus(user, currentUserIdStr);
+        const { isFriend: isFollowing, isRequestedFriend: isRequested } = await this.getFriendshipStatus(user, currentUserIdStr);
 
-        const userData = this.getUserFields(user, isOwnProfileOrAdmin);
+        const userData = await this.getUserFields(user, isOwnProfileOrAdmin);
         return { ...userData, isFollowing, isRequested };
     }
 
@@ -298,36 +341,40 @@ export class ProfileService {
      * Service: Get user saved posts
      */
     public async getSavedPosts(userId: string): Promise<any[]> {
-        const user = await this.userModel.findById(userId).populate({
-            path: "savedPosts",
-            populate: {
-                path: "user",
-                select: "firstname lastname avatar"
-            }
-        });
-
-        if (!user) {
+        const userExists = await this.userModel.exists({ _id: userId });
+        if (!userExists) {
             const error: any = new Error("User not found");
             error.statusCode = 404;
             throw error;
         }
 
-        return user.savedPosts || [];
+        const savedDocs = await this.savedPostModel.find({ user: userId })
+            .sort({ createdAt: -1 })
+            .populate({
+                path: "post",
+                populate: {
+                    path: "user",
+                    select: "firstname lastname avatar"
+                }
+            });
+
+        return savedDocs.map((s: any) => s.post).filter(Boolean);
     }
 
     /**
      * Service: Add post to user saved posts
      */
     public async addSavedPost(userId: string, postId: string): Promise<boolean> {
-        const user = await this.userModel.findById(userId);
-        if (!user) {
+        const userExists = await this.userModel.exists({ _id: userId });
+        if (!userExists) {
             const error: any = new Error("User not found");
             error.statusCode = 404;
             throw error;
         }
-        const alreadySaved = user.savedPosts?.some((p: any) => p.toString() === postId.toString());
-        if (!alreadySaved) {
-            await this.userModel.findByIdAndUpdate(userId, { $addToSet: { savedPosts: postId } });
+
+        const existing = await this.savedPostModel.findOne({ user: userId, post: postId });
+        if (!existing) {
+            await this.savedPostModel.create({ user: userId, post: postId });
             return true;
         }
         return false;
@@ -337,18 +384,15 @@ export class ProfileService {
      * Service: Remove post from user saved posts
      */
     public async removeSavedPost(userId: string, postId: string): Promise<boolean> {
-        const user = await this.userModel.findById(userId);
-        if (!user) {
+        const userExists = await this.userModel.exists({ _id: userId });
+        if (!userExists) {
             const error: any = new Error("User not found");
             error.statusCode = 404;
             throw error;
         }
-        const alreadySaved = user.savedPosts?.some((p: any) => p.toString() === postId.toString());
-        if (alreadySaved) {
-            await this.userModel.findByIdAndUpdate(userId, { $pull: { savedPosts: postId } });
-            return true;
-        }
-        return false;
+
+        const result = await this.savedPostModel.deleteOne({ user: userId, post: postId });
+        return result.deletedCount > 0;
     }
 
     /**
@@ -396,7 +440,7 @@ export class ProfileService {
         const limitNum = parseInt(String(limit), 10) || 12;
         const skip = (pageNum - 1) * limitNum;
 
-        const user = await this.userModel.findById(userId).select('-password -otp -otpExpires');
+        const user = await this.userModel.findById(userId).select('-password');
         if (!user) {
             const error: any = new Error("User not found");
             error.statusCode = 404;
@@ -442,9 +486,9 @@ export class ProfileService {
 
         const currentUserIdStr = currentUserId?.toString();
         const isOwnProfileOrAdmin = !!(currentUserIdStr && (currentUserIdStr === userId || currentUserRole === 'admin'));
-        const userData = this.getUserFields(user, isOwnProfileOrAdmin);
+        const userData = await this.getUserFields(user, isOwnProfileOrAdmin);
 
-        const { isFriend, isRequestedFriend } = this.getFriendshipStatus(user, currentUserIdStr);
+        const { isFriend, isRequestedFriend } = await this.getFriendshipStatus(user, currentUserIdStr);
         userData.isFriend = isFriend;
         userData.isRequestedFriend = isRequestedFriend;
 
@@ -477,7 +521,7 @@ export class ProfileService {
             throw error;
         }
 
-        const user = await this.userModel.findById(userId).select('-password -otp -otpExpires');
+        const user = await this.userModel.findById(userId).select('-password');
         if (!user) {
             const error: any = new Error("User not found");
             error.statusCode = 404;
@@ -512,9 +556,9 @@ export class ProfileService {
 
         const currentUserIdStr = currentUserId?.toString();
         const isOwnProfileOrAdmin = !!(currentUserIdStr && (currentUserIdStr === userId || currentUserRole === 'admin'));
-        const userData = this.getUserFields(user, isOwnProfileOrAdmin);
+        const userData = await this.getUserFields(user, isOwnProfileOrAdmin);
 
-        const { isFriend, isRequestedFriend } = this.getFriendshipStatus(user, currentUserIdStr);
+        const { isFriend, isRequestedFriend } = await this.getFriendshipStatus(user, currentUserIdStr);
         userData.isFriend = isFriend;
         userData.isRequestedFriend = isRequestedFriend;
 
@@ -542,8 +586,7 @@ export class ProfileService {
         const skipValue = (Number(page) - 1) * limitValue;
 
         const hostMatch: any = {
-            role: 'host',
-            hostStatus: 'approved'
+            role: 'host'
         };
 
         if (location && location.trim()) {
@@ -560,6 +603,16 @@ export class ProfileService {
             { $match: hostMatch },
             {
                 $lookup: {
+                    from: 'hostdetails',
+                    localField: '_id',
+                    foreignField: 'user',
+                    as: 'hostDetailsDoc'
+                }
+            },
+            { $unwind: '$hostDetailsDoc' },
+            { $match: { 'hostDetailsDoc.status': 'approved' } },
+            {
+                $lookup: {
                     from: 'reviews',
                     localField: '_id',
                     foreignField: 'host',
@@ -571,7 +624,10 @@ export class ProfileService {
                     averageRating: { $ifNull: [{ $avg: '$hostReviews.rating' }, 0] },
                     reviewCount: { $size: '$hostReviews' },
                     hasReviews: { $cond: [{ $gt: [{ $size: '$hostReviews' }, 0] }, 1, 0] },
-                    latestReviewDate: { $ifNull: [{ $max: '$hostReviews.createdAt' }, new Date(0)] }
+                    latestReviewDate: { $ifNull: [{ $max: '$hostReviews.createdAt' }, new Date(0)] },
+                    hostDetails: '$hostDetailsDoc',
+                    verifyBadge: '$hostDetailsDoc.verifyBadge',
+                    hostStatus: '$hostDetailsDoc.status'
                 }
             },
             { $match: { averageRating: { $gte: ratingValue } } },
@@ -595,7 +651,14 @@ export class ProfileService {
                     _id: 1, firstname: 1, lastname: 1, email: 1,
                     role: 1, isVerified: 1, location: 1, avatar: 1,
                     verifyBadge: 1,
-                    hostDetails: 1,
+                    hostStatus: 1,
+                    hostDetails: {
+                        yearsOfExperience: '$hostDetails.yearsOfExperience',
+                        city: '$hostDetails.city',
+                        district: '$hostDetails.district',
+                        state: '$hostDetails.state',
+                        pincode: '$hostDetails.pincode'
+                    },
                     averageRating: { $round: ['$averageRating', 1] },
                     reviewCount: 1,
                     totalPosts: { $size: '$posts' },
@@ -604,7 +667,26 @@ export class ProfileService {
             }
         ]);
 
-        const totalHostsCount = await this.userModel.countDocuments(hostMatch);
+        let totalHostsCount = 0;
+        if (location && location.trim()) {
+            const countAgg = await this.userModel.aggregate([
+                { $match: hostMatch },
+                {
+                    $lookup: {
+                        from: 'hostdetails',
+                        localField: '_id',
+                        foreignField: 'user',
+                        as: 'hostDetailsDoc'
+                    }
+                },
+                { $unwind: '$hostDetailsDoc' },
+                { $match: { 'hostDetailsDoc.status': 'approved' } },
+                { $count: 'total' }
+            ]);
+            totalHostsCount = countAgg.length > 0 ? countAgg[0].total : 0;
+        } else {
+            totalHostsCount = await this.hostDetailsModel.countDocuments({ status: 'approved' });
+        }
 
         return {
             count: topRatedHosts.length,
@@ -632,15 +714,17 @@ export class ProfileService {
             throw error;
         }
 
+        const hostDoc = user.role === "host" ? await this.hostDetailsModel.findOne({ user: userId }) : null;
+
         // Rule 1: Unverified hosts cannot update any profile details
-        if (user.role === "host" && user.hostStatus !== "approved") {
+        if (user.role === "host" && (!hostDoc || hostDoc.status !== "approved")) {
             const error: any = new Error("You cannot update your profile until your host account is verified and approved by an admin. If you have already submitted for verification, please wait for admin approval.");
             error.statusCode = 400;
             error.isUnverifiedHost = true;
             throw error;
         }
 
-        const currentDetails = user.hostDetails || {};
+        const currentDetails = hostDoc || {};
         const isYearsSupplied = yearsOfExperience !== undefined && yearsOfExperience !== null && yearsOfExperience !== "" && !isNaN(parseInt(yearsOfExperience));
         let parsedYears = currentDetails.yearsOfExperience || 0;
         if (isYearsSupplied) {
@@ -648,7 +732,7 @@ export class ProfileService {
         }
 
         // Rule 2: Approved hosts — sensitive changes must be reviewed by admin
-        if (user.role === "host" && user.hostStatus === "approved") {
+        if (user.role === "host" && hostDoc && hostDoc.status === "approved") {
             const isNameChanging = (firstname && (firstname || "").trim() !== (user.firstname || "").trim()) ||
                                    (lastname && (lastname || "").trim() !== (user.lastname || "").trim());
             const isDescriptionChanging = description !== undefined && (description || "").trim() !== (user.description || "").trim();
@@ -715,50 +799,51 @@ export class ProfileService {
             const isAnyModified = isNameChanging || isDescriptionChanging || isAvatarChanging || isVerifChanging;
 
             if (isAnyModified) {
-                if (!user.pendingHostDetails) {
-                    user.pendingHostDetails = {};
-                }
-                user.pendingHostDetails.firstname = firstname || user.firstname;
-                user.pendingHostDetails.lastname = lastname || user.lastname;
-                user.pendingHostDetails.description = description !== undefined ? description : user.description;
+                const pendingUpdates: any = {
+                    firstname: firstname || user.firstname,
+                    lastname: lastname || user.lastname,
+                    description: description !== undefined ? description : user.description,
+                    yearsOfExperience: hasYearsChanging ? parsedYears : (currentDetails.yearsOfExperience || 0),
+                    phone: phone !== undefined && phone.trim() !== '' ? phone.trim() : currentDetails.phone,
+                    physicalAddress: physicalAddress !== undefined && physicalAddress.trim() !== '' ? physicalAddress.trim() : currentDetails.physicalAddress,
+                    pincode: pincode !== undefined && pincode.trim() !== '' ? pincode.trim() : currentDetails.pincode,
+                    city: city !== undefined && city.trim() !== '' ? city.trim() : currentDetails.city,
+                    district: district !== undefined && district.trim() !== '' ? district.trim() : currentDetails.district,
+                    state: state !== undefined && state.trim() !== '' ? state.trim() : currentDetails.state,
+                };
 
                 if (removeAvatar === "true" || removeAvatar === true) {
-                    user.pendingHostDetails.avatar = null;
+                    pendingUpdates.avatar = null;
                 } else if (avatarUrl) {
-                    user.pendingHostDetails.avatar = { url: avatarUrl, public_id: avatarPublicId };
+                    pendingUpdates.avatar = { url: avatarUrl, public_id: avatarPublicId };
                 } else {
-                    user.pendingHostDetails.avatar = user.avatar;
+                    pendingUpdates.avatar = user.avatar;
                 }
-
-                user.pendingHostDetails.yearsOfExperience = hasYearsChanging ? parsedYears : (currentDetails.yearsOfExperience || 0);
-                user.pendingHostDetails.phone = phone !== undefined && phone.trim() !== '' ? phone.trim() : currentDetails.phone;
-                user.pendingHostDetails.physicalAddress = physicalAddress !== undefined && physicalAddress.trim() !== '' ? physicalAddress.trim() : currentDetails.physicalAddress;
-                user.pendingHostDetails.pincode = pincode !== undefined && pincode.trim() !== '' ? pincode.trim() : currentDetails.pincode;
-                user.pendingHostDetails.city = city !== undefined && city.trim() !== '' ? city.trim() : currentDetails.city;
-                user.pendingHostDetails.district = district !== undefined && district.trim() !== '' ? district.trim() : currentDetails.district;
-                user.pendingHostDetails.state = state !== undefined && state.trim() !== '' ? state.trim() : currentDetails.state;
 
                 if (proposedAadhaar.length > 0) {
-                    user.pendingHostDetails.aadhaarCard = proposedAadhaar;
+                    pendingUpdates.aadhaarCard = proposedAadhaar;
                 } else if (currentDetails.aadhaarCard && currentDetails.aadhaarCard.length > 0) {
-                    user.pendingHostDetails.aadhaarCard = currentDetails.aadhaarCard;
+                    pendingUpdates.aadhaarCard = currentDetails.aadhaarCard;
                 }
 
-                if (user.hostDetails) {
-                    user.hostDetails.tempVerifiedPhone = undefined;
-                }
+                await this.hostDetailsModel.findOneAndUpdate(
+                    { user: user._id },
+                    {
+                        $set: { pendingHostDetails: pendingUpdates },
+                        $unset: { tempVerifiedPhone: 1 }
+                    }
+                );
 
                 if (interests !== undefined) {
                     user.interests = this.parseInterests(interests);
+                    await user.save();
                 }
-
-                await user.save();
 
                 // Send email notification to admin using renderDocumentListHtml
                 const adminEmail = process.env.ADMIN_EMAIL || "teamsathithya@gmail.com";
                 const adminSubject = `Host Profile Update Review Request - Athithya`;
                 const hostname = `${user.firstname} ${user.lastname}`;
-                const docListHtml = renderDocumentListHtml(user.pendingHostDetails.aadhaarCard);
+                const docListHtml = renderDocumentListHtml(pendingUpdates.aadhaarCard);
 
                 this.emailNotifier({
                     to: adminEmail,
@@ -767,12 +852,12 @@ export class ProfileService {
                     data: {
                         hostname,
                         email: user.email,
-                        phone: user.pendingHostDetails.phone || "N/A",
-                        address: user.pendingHostDetails.physicalAddress || "N/A",
-                        city: user.pendingHostDetails.city || "N/A",
-                        district: user.pendingHostDetails.district || "N/A",
-                        state: user.pendingHostDetails.state || "N/A",
-                        pincode: user.pendingHostDetails.pincode || "N/A",
+                        phone: pendingUpdates.phone || "N/A",
+                        address: pendingUpdates.physicalAddress || "N/A",
+                        city: pendingUpdates.city || "N/A",
+                        district: pendingUpdates.district || "N/A",
+                        state: pendingUpdates.state || "N/A",
+                        pincode: pendingUpdates.pincode || "N/A",
                         docListHtml
                     }
                 }).catch((err: any) => console.error("Failed to send admin host profile update verification email:", err));
@@ -800,7 +885,7 @@ export class ProfileService {
                 return {
                     isPendingReview: true,
                     message: "Your profile updates have been submitted to the admin panel for review. Once approved, your profile will be updated successfully.",
-                    user: this.getUserFields(user, true)
+                    user: await this.getUserFields(user, true)
                 };
             }
         }
@@ -845,7 +930,7 @@ export class ProfileService {
         return {
             isPendingReview: false,
             message: "Profile updated successfully",
-            user: this.getUserFields(user, true)
+            user: await this.getUserFields(user, true)
         };
     }
 }

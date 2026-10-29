@@ -17,7 +17,7 @@ const notificationSchema = new mongoose.Schema({
         postId: { type: mongoose.Schema.Types.ObjectId, ref: 'post' },
         userId: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
         bookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'booking' },
-        scheduleId: { type: mongoose.Schema.Types.ObjectId, ref: 'schedule' }
+        groupBookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'groupBooking' }
     }
 }, { timestamps: true });
 

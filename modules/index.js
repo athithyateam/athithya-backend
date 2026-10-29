@@ -4,8 +4,8 @@ const reviews = require("../routes/reviews");
 const itineraries = require("../routes/itineraries");
 const search = require("../routes/search");
 const bookings = require("../routes/bookings");
-const schedules = require("../routes/schedules");
-const guestSchedules = require("../routes/guestSchedules");
+const groupBookings = require("../routes/groupBookings");
+const wishlistSchedules = require("../routes/wishlistSchedules");
 const chat = require("../routes/chat");
 const notifications = require("../routes/notifications");
 const analytics = require("../routes/analytics");
@@ -19,8 +19,8 @@ module.exports = {
   itineraries,
   search,
   bookings,
-  schedules,
-  guestSchedules,
+  groupBookings,
+  wishlistSchedules,
   chat,
   notifications,
   analytics,

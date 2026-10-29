@@ -23,7 +23,7 @@ Manages experience reservations, Razorpay order creation and payment verificatio
     "selectedTime": "10:00 AM",
     "guestMessage": "Looking forward to this experience!",
     "invitedUserIds": ["60d0fe4..."], // Optional: IDs of invited friends
-    "scheduleId": "64f9c1..." // Optional: Linked group planning schedule ID
+    "groupBookingId": "64f9c1..." // Optional: Linked group booking session ID
   }
   ```
 * **Success Response (200)**:

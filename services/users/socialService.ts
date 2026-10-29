@@ -1,4 +1,4 @@
-import { User, Notification, Conversation, Message } from "../../db/mongoose";
+import { User, Notification, Conversation, Message, Friendship, FriendRequest } from "../../db/mongoose";
 import { notificationService } from "../notificationService";
 
 export class SocialService {
@@ -6,6 +6,8 @@ export class SocialService {
     private static instanceKey = Symbol("SocialServiceInstanceKey");
 
     private userModel: any;
+    private friendshipModel: any;
+    private friendRequestModel: any;
     private notificationModel: any;
     private conversationModel: any;
     private messageModel: any;
@@ -14,6 +16,8 @@ export class SocialService {
     constructor(
         instanceKey: symbol,
         userModel: any = User,
+        friendshipModel: any = Friendship,
+        friendRequestModel: any = FriendRequest,
         notificationModel: any = Notification,
         conversationModel: any = Conversation,
         messageModel: any = Message,
@@ -23,6 +27,8 @@ export class SocialService {
             throw new Error("Please use SocialService.getInstance() to retrieve or create an instance");
         }
         this.userModel = userModel;
+        this.friendshipModel = friendshipModel;
+        this.friendRequestModel = friendRequestModel;
         this.notificationModel = notificationModel;
         this.conversationModel = conversationModel;
         this.messageModel = messageModel;
@@ -31,6 +37,8 @@ export class SocialService {
 
     public static getInstance(
         userModel?: any,
+        friendshipModel?: any,
+        friendRequestModel?: any,
         notificationModel?: any,
         conversationModel?: any,
         messageModel?: any,
@@ -39,10 +47,12 @@ export class SocialService {
         if (!this.instance) {
             this.instance = new SocialService(
                 this.instanceKey,
-                userModel,
-                notificationModel,
-                conversationModel,
-                messageModel,
+                userModel || User,
+                friendshipModel || Friendship,
+                friendRequestModel || FriendRequest,
+                notificationModel || Notification,
+                conversationModel || Conversation,
+                messageModel || Message,
                 notificationSvc || notificationService
             );
         }
@@ -68,33 +78,46 @@ export class SocialService {
             throw error;
         }
 
-        const currentUser = await this.userModel.findById(currentUserId);
+        const currentUser = await this.userModel.findById(currentUserId).select("firstname lastname");
         if (!currentUser) {
             const error: any = new Error("User not found");
             error.statusCode = 404;
             throw error;
         }
 
-        const targetUser = await this.userModel.findById(targetUserId);
+        const targetUser = await this.userModel.findById(targetUserId).select("_id");
         if (!targetUser) {
             const error: any = new Error("User not found");
             error.statusCode = 404;
             throw error;
         }
 
-        if (currentUser.friends?.some((id: any) => id.toString() === targetUserId)) {
+        // Check if already friends via dedicated Friendship collection (O(1) indexed check)
+        const areFriends = await this.friendshipModel.exists({ user: currentUserId, friend: targetUserId });
+        if (areFriends) {
             const error: any = new Error("Already friends");
             error.statusCode = 400;
             throw error;
         }
 
-        if (targetUser.friendRequests?.some((id: any) => id.toString() === currentUserId)) {
+        // Check if request already pending
+        const existingReq = await this.friendRequestModel.findOne({
+            sender: currentUserId,
+            recipient: targetUserId,
+            status: "pending"
+        });
+        if (existingReq) {
             const error: any = new Error("Request already sent");
             error.statusCode = 400;
             throw error;
         }
 
-        await this.userModel.findByIdAndUpdate(targetUserId, { $addToSet: { friendRequests: currentUserId } });
+        // Upsert friend request record
+        await this.friendRequestModel.findOneAndUpdate(
+            { sender: currentUserId, recipient: targetUserId },
+            { $set: { status: "pending" } },
+            { upsert: true, new: true }
+        );
 
         await this.notificationSvc.sendNotification({
             recipient: targetUserId,
@@ -115,19 +138,34 @@ export class SocialService {
      * Service: Accept friend request
      */
     public async acceptFriendRequest(requesterId: string, currentUserId: string): Promise<boolean> {
-        const currentUser = await this.userModel.findById(currentUserId);
-        if (!currentUser || !currentUser.friendRequests?.some((id: any) => id.toString() === requesterId)) {
+        const pendingRequest = await this.friendRequestModel.findOne({
+            sender: requesterId,
+            recipient: currentUserId,
+            status: "pending"
+        });
+
+        if (!pendingRequest) {
             const error: any = new Error("No request found");
             error.statusCode = 400;
             throw error;
         }
 
-        await this.userModel.findByIdAndUpdate(currentUserId, {
-            $pull: { friendRequests: requesterId },
-            $addToSet: { friends: requesterId }
-        });
-        await this.userModel.findByIdAndUpdate(requesterId, { $addToSet: { friends: currentUserId } });
+        // Remove the friend request
+        await this.friendRequestModel.deleteOne({ _id: pendingRequest._id });
 
+        // Create bidirectional friendship entries
+        await this.friendshipModel.updateOne(
+            { user: currentUserId, friend: requesterId },
+            { $set: { user: currentUserId, friend: requesterId } },
+            { upsert: true }
+        );
+        await this.friendshipModel.updateOne(
+            { user: requesterId, friend: currentUserId },
+            { $set: { user: requesterId, friend: currentUserId } },
+            { upsert: true }
+        );
+
+        const currentUser = await this.userModel.findById(currentUserId).select("firstname lastname");
         const requester = await this.userModel.findById(requesterId).select("firstname lastname email");
 
         const updatedNotif = await this.notificationModel.findOneAndUpdate(
@@ -151,7 +189,7 @@ export class SocialService {
             recipient: requesterId,
             sender: currentUserId,
             title: "Friend Request Accepted",
-            message: `${currentUser.firstname} accepted your request`,
+            message: `${currentUser?.firstname || "User"} accepted your request`,
             type: "friend_accepted",
             link: `/profile/${currentUserId}`,
             metadata: { userId: currentUserId },
@@ -166,7 +204,7 @@ export class SocialService {
      * Service: Reject friend request
      */
     public async rejectFriendRequest(requesterId: string, currentUserId: string): Promise<boolean> {
-        await this.userModel.findByIdAndUpdate(currentUserId, { $pull: { friendRequests: requesterId } });
+        await this.friendRequestModel.deleteOne({ sender: requesterId, recipient: currentUserId });
 
         const requester = await this.userModel.findById(requesterId).select("firstname lastname");
 
@@ -195,8 +233,21 @@ export class SocialService {
      * Service: Unfriend user and clear direct conversation
      */
     public async unfriend(targetUserId: string, currentUserId: string): Promise<boolean> {
-        await this.userModel.findByIdAndUpdate(currentUserId, { $pull: { friends: targetUserId } });
-        await this.userModel.findByIdAndUpdate(targetUserId, { $pull: { friends: currentUserId, friendRequests: currentUserId } });
+        // Remove bidirectional friendship records
+        await this.friendshipModel.deleteMany({
+            $or: [
+                { user: currentUserId, friend: targetUserId },
+                { user: targetUserId, friend: currentUserId }
+            ]
+        });
+
+        // Also clean up any lingering friend requests
+        await this.friendRequestModel.deleteMany({
+            $or: [
+                { sender: currentUserId, recipient: targetUserId },
+                { sender: targetUserId, recipient: currentUserId }
+            ]
+        });
 
         // Find and delete direct 1-to-1 conversation and messages between them
         const conversation = await this.conversationModel.findOne({
@@ -216,28 +267,28 @@ export class SocialService {
      * Service: Get friends list for a user with pagination
      */
     public async getFriends(userId: string, page: number | string = 1, limit: number | string = 20): Promise<{ count: number; data: any[] }> {
-        const userDoc = await this.userModel.findById(userId).select('friends');
-        if (!userDoc) {
+        const userExists = await this.userModel.exists({ _id: userId });
+        if (!userExists) {
             const error: any = new Error("User not found");
             error.statusCode = 404;
             throw error;
         }
 
-        const rawFriendIds = (userDoc.friends || []).filter(Boolean);
+        const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+        const limitNum = Math.max(1, parseInt(String(limit), 10) || 20);
 
-        const validFriends = await this.userModel.find({ _id: { $in: rawFriendIds } })
-            .select('firstname lastname avatar description role')
-            .sort({ firstname: 1 })
-            .skip((Number(page) - 1) * Number(limit))
-            .limit(Number(limit));
+        const totalFriendsCount = await this.friendshipModel.countDocuments({ user: userId });
 
-        const totalFriendsCount = await this.userModel.countDocuments({ _id: { $in: rawFriendIds } });
+        const friendships = await this.friendshipModel.find({ user: userId })
+            .sort({ createdAt: -1 })
+            .skip((pageNum - 1) * limitNum)
+            .limit(limitNum)
+            .populate({
+                path: 'friend',
+                select: 'firstname lastname avatar description role'
+            });
 
-        // Clean up stale/deleted user IDs from friends array if counts mismatch
-        if (rawFriendIds.length !== totalFriendsCount) {
-            const existingIds = (await this.userModel.find({ _id: { $in: rawFriendIds } }).select('_id')).map((u: any) => u._id);
-            await this.userModel.updateOne({ _id: userId }, { friends: existingIds });
-        }
+        const validFriends = friendships.map((f: any) => f.friend).filter(Boolean);
 
         return {
             count: totalFriendsCount,
@@ -258,11 +309,16 @@ export class SocialService {
         const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
         const limitNum = Math.max(1, parseInt(String(limit), 10) || 10);
 
-        const currentUser = currentUserId ? await this.userModel.findById(currentUserId).select("friends friendRequests") : null;
-        const friendIds = (currentUser?.friends || []).map((id: any) => id.toString());
-        const mySentRequests = currentUserId
-            ? (await this.userModel.find({ friendRequests: currentUserId }).select("_id")).map((u: any) => u._id.toString())
-            : [];
+        let friendIds: string[] = [];
+        let mySentRequests: string[] = [];
+
+        if (currentUserId) {
+            const friendships = await this.friendshipModel.find({ user: currentUserId }).select("friend");
+            friendIds = friendships.map((f: any) => f.friend ? f.friend.toString() : "").filter(Boolean);
+
+            const sentReqs = await this.friendRequestModel.find({ sender: currentUserId, status: "pending" }).select("recipient");
+            mySentRequests = sentReqs.map((r: any) => r.recipient ? r.recipient.toString() : "").filter(Boolean);
+        }
 
         const query: any = {
             isDeleted: { $ne: true }

@@ -127,10 +127,10 @@ const reviewRoutes = require("./routes/reviews");
 const itineraryRoutes = require("./routes/itineraries");
 const searchRoutes = require("./routes/search");
 const bookingRoutes = require("./routes/bookings");
-const scheduleRoutes = require("./routes/schedules");
-const guestScheduleRoutes = require("./routes/guestSchedules");
+const groupBookingRoutes = require("./routes/groupBookings");
+const wishlistScheduleRoutes = require("./routes/wishlistSchedules");
 const chatRoutes = require("./routes/chat");
-const { startScheduleReminderWorker } = require("./utils/scheduleReminderWorker");
+const { startWishlistReminderWorker } = require("./utils/wishlistReminderWorker");
 
 app.use("/api/auth", userRoutes);
 app.use("/api/users", userRoutes);
@@ -140,14 +140,14 @@ app.use("/api/itineraries", itineraryRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/notifications", require("./routes/notifications"));
 app.use("/api/bookings", bookingRoutes);
-app.use("/api/schedules", scheduleRoutes);
-app.use("/api/guest-schedules", guestScheduleRoutes);
+app.use("/api/group-bookings", groupBookingRoutes);
+app.use("/api/wishlist-schedules", wishlistScheduleRoutes);
 app.use("/api/admin", require("./routes/admin"));
 app.use("/api/analytics", require("./routes/analytics"));
 app.use("/api/chat", chatRoutes);
 
-// Start background worker for guest experience schedule reminders
-startScheduleReminderWorker(app);
+// Start background worker for wishlist experience schedule reminders
+startWishlistReminderWorker(app);
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok", message: "Server is running" });
@@ -236,8 +236,8 @@ if (shouldListen) {
     }
 
      // Start periodic background tasks for expired group bookings
-     const { checkExpiredSchedules } = require("./utils/bookingCleanup");
-     setInterval(() => checkExpiredSchedules(), 60 * 1000);
+     const { checkExpiredGroupBookings } = require("./utils/bookingCleanup");
+     setInterval(() => checkExpiredGroupBookings(), 60 * 1000);
      console.log(`[CLEANUP] Periodic 1-hour booking expiration scheduler started (interval: 60s)`);
   });
 } else {

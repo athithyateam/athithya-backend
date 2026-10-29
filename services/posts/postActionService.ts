@@ -1,4 +1,4 @@
-const { Post, User, Notification, HostHistory, Booking, Review } = require("../../db/mongoose");
+const { Post, User, Notification, HostDetails, HostAuditLog, Booking, Review } = require("../../db/mongoose");
 const { storageService: defaultStorageService } = require("../storageService");
 const { googleDriveService: defaultGoogleDriveService } = require("../googleDriveService");
 const { emailService: defaultEmailService } = require("../emailService");
@@ -8,7 +8,7 @@ const { userService: defaultUserService } = require("../userService");
 import { PostReactionService, postReactionService as defaultPostReactionService } from "./postReactionService";
 import {
     parsePostPayload, calculatePricingAndFees, isValidS3MediaUrl, parseIfJson,
-    buildCategoryFilter, attachDistanceToTreks, recordHostHistory, LISTING_CARD_PROJECTION,
+    buildCategoryFilter, attachDistanceToTreks, recordHostAuditLog, LISTING_CARD_PROJECTION,
     buildPostsFilter, roundRobinMerge, cleanupMediaAssets, deleteMediaAssets,
     GetPostsOptions, PaginatedPostsResult, PostDetailResult, GetTopRatedTreksOptions,
     TopRatedTreksResult, GetNearbyTreksOptions, NearbyTreksResult, GetPendingPostsOptions,
@@ -28,7 +28,8 @@ export class PostActionService {
     private postModel: any;
     private userModel: any;
     private notificationModel: any;
-    private hostHistoryModel: any;
+    private hostAuditLogModel: any;
+    private hostDetailsModel: any;
     private bookingModel: any;
     private reviewModel: any;
     private storageService: any;
@@ -40,10 +41,11 @@ export class PostActionService {
 
     constructor(instanceKey: symbol, ...args: any[]) {
         if (instanceKey !== PostActionService.instanceKey) throw new Error("Use PostActionService.getInstance()");
-        const [pm = Post, um = User, nm = Notification, hhm = HostHistory, bm = Booking, ss = defaultStorageService, gds = defaultGoogleDriveService, es = defaultEmailService, an = defaultNotifyAdmins, us = defaultUserService, rs = defaultPostReactionService, rm = Review] = args;
-        this.postModel = pm; this.userModel = um; this.notificationModel = nm; this.hostHistoryModel = hhm;
+        const [pm = Post, um = User, nm = Notification, halm = HostAuditLog, bm = Booking, ss = defaultStorageService, gds = defaultGoogleDriveService, es = defaultEmailService, an = defaultNotifyAdmins, us = defaultUserService, rs = defaultPostReactionService, rm = Review, hdm = HostDetails] = args;
+        this.postModel = pm; this.userModel = um; this.notificationModel = nm; this.hostAuditLogModel = halm;
         this.bookingModel = bm; this.storageService = ss; this.googleDriveService = gds; this.emailService = es;
         this.adminNotifier = an; this.userService = us; this.reactionService = rs; this.reviewModel = rm;
+        this.hostDetailsModel = hdm;
     }
 
     public static getInstance(...args: any[]): PostActionService {
@@ -83,8 +85,11 @@ export class PostActionService {
     public async createPost(userId: string, userRole: string, postPayload: any, _files: any = null, reqOrApp: any = null): Promise<any> {
         const hostUser = await this.userModel.findById(userId);
         if (!hostUser) throw Object.assign(new Error("User not found"), { statusCode: 404 });
-        if (userRole === "host" && hostUser.hostStatus !== "approved") {
-            throw Object.assign(new Error("You cannot add experiences until your host account is verified and approved by an admin."), { statusCode: 403 });
+        if (userRole === "host") {
+            const hostDetails = await this.hostDetailsModel.findOne({ user: userId });
+            if (!hostDetails || hostDetails.status !== "approved") {
+                throw Object.assign(new Error("You cannot add experiences until your host account is verified and approved by an admin."), { statusCode: 403 });
+            }
         }
         if (!postPayload.title || !postPayload.description) {
             throw Object.assign(new Error("Title and description are required"), { statusCode: 400 });
@@ -241,10 +246,24 @@ export class PostActionService {
         }
 
         const hostUser = await this.userModel.findById(post.user);
-        await recordHostHistory(this.hostHistoryModel, {
-            type: "experience_delete", hostId: post.user, hostName: hostUser ? `${hostUser.firstname} ${hostUser.lastname}` : "Unknown Host",
-            experienceTitle: post.title || "", experiencePrice: post.price, experienceDuration: post.duration,
-            experienceLocation: post.location, experienceCategories: post.categories || []
+        await recordHostAuditLog(this.hostAuditLogModel, {
+            type: "experience_delete",
+            hostId: post.user,
+            hostName: hostUser ? `${hostUser.firstname} ${hostUser.lastname}` : "Unknown Host",
+            snapshot: {
+                title: post.title || "",
+                subtitle: post.subtitle || "",
+                description: post.description || "",
+                longDescription: post.longDescription || "",
+                price: post.price,
+                duration: post.duration,
+                location: post.location,
+                capacity: post.capacity,
+                amenities: post.amenities || [],
+                rules: post.privacyPolicy || [],
+                photos: post.photos || [],
+                categories: post.categories || []
+            }
         });
 
         await deleteMediaAssets(this.storageService, this.googleDriveService, [...(post.photos || []), ...(post.videos || [])]);
@@ -278,9 +297,9 @@ export class PostActionService {
         if (sort === "bookings" || sort === "loved") {
             const neededLimit = skip + Number(limit);
             const [topSaved, topBooked, topClicked, total] = await Promise.all([
-                this.postModel.find({ ...filter, savesCount: { $gt: 0 } }).select(LISTING_CARD_PROJECTION).populate("user", "firstname lastname email role avatar hostStatus verifyBadge").sort({ savesCount: -1, createdAt: -1 }).limit(neededLimit),
-                this.postModel.find({ ...filter, bookingCount: { $gt: 0 } }).select(LISTING_CARD_PROJECTION).populate("user", "firstname lastname email role avatar hostStatus verifyBadge").sort({ bookingCount: -1, createdAt: -1 }).limit(neededLimit),
-                this.postModel.find(filter).select(LISTING_CARD_PROJECTION).populate("user", "firstname lastname email role avatar hostStatus verifyBadge").sort({ clicks: -1, createdAt: -1 }).limit(neededLimit),
+                this.postModel.find({ ...filter, savesCount: { $gt: 0 } }).select(LISTING_CARD_PROJECTION).populate("user", "firstname lastname email role avatar").sort({ savesCount: -1, createdAt: -1 }).limit(neededLimit),
+                this.postModel.find({ ...filter, bookingCount: { $gt: 0 } }).select(LISTING_CARD_PROJECTION).populate("user", "firstname lastname email role avatar").sort({ bookingCount: -1, createdAt: -1 }).limit(neededLimit),
+                this.postModel.find(filter).select(LISTING_CARD_PROJECTION).populate("user", "firstname lastname email role avatar").sort({ clicks: -1, createdAt: -1 }).limit(neededLimit),
                 this.postModel.countDocuments(filter)
             ]);
             const posts = roundRobinMerge([topSaved, topBooked, topClicked], skip, Number(limit));
@@ -292,7 +311,7 @@ export class PostActionService {
         else if (sort === "rating") sortObj = { "rating.average": -1, "rating.count": -1, createdAt: -1 };
 
         const [posts, total] = await Promise.all([
-            this.postModel.find(filter).select(LISTING_CARD_PROJECTION).populate("user", "firstname lastname email role avatar hostStatus verifyBadge").sort(sortObj).limit(Number(limit)).skip(skip),
+            this.postModel.find(filter).select(LISTING_CARD_PROJECTION).populate("user", "firstname lastname email role avatar").sort(sortObj).limit(Number(limit)).skip(skip),
             this.postModel.countDocuments(filter)
         ]);
 
@@ -301,8 +320,24 @@ export class PostActionService {
 
     public async getPostDetail(postId: string): Promise<PostDetailResult> {
         const post = await this.postModel.findById(postId)
-            .populate("user", "firstname lastname email role avatar description location hostDetails hostStatus isHostVerified verifiedBadge createdAt");
+            .populate("user", "firstname lastname email role avatar description location createdAt");
         if (!post) throw Object.assign(new Error("Post not found"), { statusCode: 404 });
+
+        if (post.user?._id) {
+            const hostDetails = await this.hostDetailsModel.findOne({ user: post.user._id });
+            if (hostDetails) {
+                const userObj = typeof post.user.toObject === 'function' ? post.user.toObject() : post.user;
+                userObj.hostDetails = {
+                    yearsOfExperience: hostDetails.yearsOfExperience,
+                    phone: hostDetails.phone,
+                    city: hostDetails.city,
+                    state: hostDetails.state
+                };
+                userObj.hostStatus = hostDetails.status;
+                userObj.verifyBadge = hostDetails.verifyBadge;
+                post.user = userObj;
+            }
+        }
 
         await this.postModel.updateOne({ _id: post._id }, { $inc: { clicks: 1 } });
 
@@ -346,7 +381,7 @@ export class PostActionService {
             { $match: { "post.postType": "trek", "post.status": "active", "post.isHidden": { $ne: true } } },
             { $skip: skip },
             { $limit: Number(limit) },
-            { $lookup: { from: "users", localField: "post.user", foreignField: "_id", pipeline: [{ $project: { firstname: 1, lastname: 1, email: 1, role: 1, avatar: 1, hostStatus: 1, verifyBadge: 1 } }], as: "userDetails" } },
+            { $lookup: { from: "users", localField: "post.user", foreignField: "_id", pipeline: [{ $project: { firstname: 1, lastname: 1, email: 1, role: 1, avatar: 1 } }], as: "userDetails" } },
             {
                 $replaceRoot: {
                     newRoot: {
@@ -389,7 +424,7 @@ export class PostActionService {
 
         const query = this.postModel.find(filter)
             .select(LISTING_CARD_PROJECTION)
-            .populate("user", "firstname lastname email role avatar hostStatus verifyBadge")
+            .populate("user", "firstname lastname email role avatar")
             .limit(Number(limit))
             .skip(skip);
 
@@ -406,7 +441,7 @@ export class PostActionService {
         if (postType) filter.postType = postType;
         return await this.postModel.find(filter)
             .select(LISTING_CARD_PROJECTION)
-            .populate("user", "firstname lastname email role avatar hostStatus verifyBadge")
+            .populate("user", "firstname lastname email role avatar")
             .sort({ createdAt: -1 });
     }
 
@@ -418,7 +453,7 @@ export class PostActionService {
         const [posts, total] = await Promise.all([
             this.postModel.find(filter)
                 .select(LISTING_CARD_PROJECTION)
-                .populate("user", "firstname lastname email role avatar hostStatus verifyBadge")
+                .populate("user", "firstname lastname email role avatar")
                 .sort({ createdAt: -1 })
                 .limit(Number(limit))
                 .skip(skip),

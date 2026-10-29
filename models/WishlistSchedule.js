@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const guestScheduleSchema = new mongoose.Schema({
+const wishlistScheduleSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
     post: { type: mongoose.Schema.Types.ObjectId, ref: 'post', required: true },
     postType: { type: String, default: 'experience' },
@@ -10,10 +10,10 @@ const guestScheduleSchema = new mongoose.Schema({
     status: { type: String, enum: ['scheduled', 'notified'], default: 'scheduled' }
 }, { timestamps: true });
 
-guestScheduleSchema.index({ user: 1, post: 1 });
-guestScheduleSchema.index({ user: 1, createdAt: -1 });
-guestScheduleSchema.index({ status: 1, scheduledDateTime: 1 });
+wishlistScheduleSchema.index({ user: 1, post: 1 });
+wishlistScheduleSchema.index({ user: 1, createdAt: -1 });
+wishlistScheduleSchema.index({ status: 1, scheduledDateTime: 1 });
 
-const GuestSchedule = mongoose.model("guestSchedule", guestScheduleSchema);
+const WishlistSchedule = mongoose.model("wishlistSchedule", wishlistScheduleSchema);
 
-module.exports = GuestSchedule;
+module.exports = WishlistSchedule;

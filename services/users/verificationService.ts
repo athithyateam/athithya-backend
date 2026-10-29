@@ -1,4 +1,4 @@
-import { User, Notification } from "../../db/mongoose";
+import { User, Notification, HostDetails } from "../../db/mongoose";
 import { parseIfJson } from "../posts/postPayloadParser";
 import { sendTemplateEmail } from "../emailService";
 import { notificationService } from "../notificationService";
@@ -39,6 +39,7 @@ export class VerificationService {
     private static instanceKey = Symbol("VerificationServiceInstanceKey");
 
     private userModel: any;
+    private hostDetailsModel: any;
     private notificationModel: any;
     private emailNotifier: (options: any) => Promise<any>;
     private otpService: OtpService;
@@ -48,12 +49,14 @@ export class VerificationService {
         userModel: any = User,
         notificationModel: any = Notification,
         emailNotifier: (options: any) => Promise<any> = sendTemplateEmail,
-        otpServiceInstance: OtpService = defaultOtpService
+        otpServiceInstance: OtpService = defaultOtpService,
+        hostDetailsModel: any = HostDetails
     ) {
         if (instanceKey !== VerificationService.instanceKey) {
             throw new Error("Please use VerificationService.getInstance() to retrieve or create an instance");
         }
         this.userModel = userModel;
+        this.hostDetailsModel = hostDetailsModel;
         this.notificationModel = notificationModel;
         this.emailNotifier = emailNotifier;
         this.otpService = otpServiceInstance;
@@ -90,11 +93,14 @@ export class VerificationService {
      * Check if a phone number is already verified by another host
      */
     public async checkPhoneAvailable(normalizedPhone: string, excludeUserId?: string): Promise<void> {
-        const existingHost = await this.userModel.findOne({
-            "hostDetails.phone": normalizedPhone,
-            "hostDetails.phoneVerified": true,
-            _id: { $ne: excludeUserId }
-        });
+        const query: any = {
+            phone: normalizedPhone,
+            phoneVerified: true
+        };
+        if (excludeUserId) {
+            query.user = { $ne: excludeUserId };
+        }
+        const existingHost = await this.hostDetailsModel.findOne(query);
 
         if (existingHost) {
             const error: any = new Error("This phone number has already been used, please try another number");
@@ -131,17 +137,20 @@ export class VerificationService {
             throw error;
         }
 
-        if (!user.hostDetails) {
-            user.hostDetails = {};
+        const hostDetails = await this.hostDetailsModel.findOne({ user: userId });
+        const updateData: any = {};
+        if (hostDetails && hostDetails.status === 'approved') {
+            updateData.tempVerifiedPhone = normalizedPhone;
+        } else {
+            updateData.phone = normalizedPhone;
+            updateData.phoneVerified = true;
         }
 
-        if (user.hostStatus === 'approved') {
-            user.hostDetails.tempVerifiedPhone = normalizedPhone;
-        } else {
-            user.hostDetails.phone = normalizedPhone;
-            user.hostDetails.phoneVerified = true;
-        }
-        await user.save();
+        await this.hostDetailsModel.findOneAndUpdate(
+            { user: userId },
+            { $set: updateData },
+            { upsert: true, new: true }
+        );
         return true;
     }
 
@@ -178,7 +187,8 @@ export class VerificationService {
         }
 
         // Enforce phone OTP verification
-        if (!user.hostDetails || !user.hostDetails.phoneVerified || user.hostDetails.phone !== normalizedPhone) {
+        const hostDetails = await this.hostDetailsModel.findOne({ user: userId });
+        if (!hostDetails || !hostDetails.phoneVerified || hostDetails.phone !== normalizedPhone) {
             const error: any = new Error("Please verify your phone number via OTP first");
             error.statusCode = 400;
             throw error;
@@ -197,17 +207,25 @@ export class VerificationService {
 
         const parsedYears = yearsOfExperience !== undefined ? Math.min(30, Math.max(0, parseInt(String(yearsOfExperience), 10) || 0)) : 0;
 
-        user.hostDetails = {
-            phone: normalizedPhone,
-            phoneVerified: true,
-            physicalAddress,
-            pincode,
-            city,
-            district,
-            state,
-            yearsOfExperience: parsedYears,
-            aadhaarCard: aadhaarCardData
-        };
+        await this.hostDetailsModel.findOneAndUpdate(
+            { user: userId },
+            {
+                $set: {
+                    phone: normalizedPhone,
+                    phoneVerified: true,
+                    physicalAddress,
+                    pincode,
+                    city,
+                    district,
+                    state,
+                    yearsOfExperience: parsedYears,
+                    aadhaarCard: aadhaarCardData,
+                    status: 'pending_approval'
+                },
+                $unset: { pendingHostDetails: 1 }
+            },
+            { upsert: true, new: true }
+        );
 
         if (!user.location) {
             user.location = {};
@@ -216,10 +234,7 @@ export class VerificationService {
         user.location.state = state;
         user.location.country = 'India';
         user.location.lastUpdated = new Date();
-
         user.role = 'host';
-        user.hostStatus = 'pending_approval';
-        user.set('pendingHostDetails', undefined);
         await user.save();
 
         // Notify Admin via email
@@ -264,7 +279,7 @@ export class VerificationService {
             console.error("Failed to notify admins:", notifErr);
         }
 
-        return { hostStatus: user.hostStatus };
+        return { hostStatus: 'pending_approval' };
     }
 }
 

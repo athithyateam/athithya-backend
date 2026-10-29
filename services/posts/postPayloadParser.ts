@@ -200,24 +200,26 @@ export function calculatePricingAndFees(priceObj: any): { basePrice: number; fee
 }
 
 /** Reusable helper to record rolling audit history for host actions */
-export async function recordHostHistory(
-    hostHistoryModel: any,
+export async function recordHostAuditLog(
+    hostAuditLogModel: any,
     entry: Record<string, any>,
     filter: Record<string, any> = { type: entry.type },
     maxEntries: number = 10
 ): Promise<any> {
     try {
-        const record = await hostHistoryModel.create(entry);
-        const items = await hostHistoryModel.find(filter).sort({ createdAt: -1 });
+        const record = await hostAuditLogModel.create(entry);
+        const items = await hostAuditLogModel.find(filter).sort({ createdAt: -1 });
         if (items.length > maxEntries) {
             const idsToDelete = items.slice(maxEntries).map((item: any) => item._id);
-            await hostHistoryModel.deleteMany({ _id: { $in: idsToDelete } });
+            await hostAuditLogModel.deleteMany({ _id: { $in: idsToDelete } });
         }
         return record;
     } catch (err: any) {
-        console.error("Error recording host history:", err);
+        console.error("Error recording host audit log:", err);
     }
 }
+
+export const recordHostHistory = recordHostAuditLog;
 
 /** Parse and normalize post form-data and JSON fields */
 export function parsePostPayload(payload: any, basePost: any = null): NormalizedPostFields {
@@ -376,6 +378,7 @@ module.exports = {
     isValidS3MediaUrl,
     getPlatformFeeRate,
     calculatePricingAndFees,
+    recordHostAuditLog,
     recordHostHistory,
     parsePostPayload,
     buildPostsFilter,

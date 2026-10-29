@@ -1,43 +1,45 @@
-const { User, Notification, HostHistory } = require("../../db/mongoose");
+const { User, Notification, HostDetails, HostAuditLog } = require("../../db/mongoose");
 const { sendHtmlEmail } = require("../../services/emailService");
 const { deleteFile } = require("../../services/storageService");
 const { notificationService } = require("../../services/notificationService");
 
-const saveHostOldDetails = async (user, changedFields = []) => {
+const saveHostOldDetails = async (user, hostDetails, changedFields = []) => {
     try {
         if (!user) return;
         const hostName = `${user.firstname || ''} ${user.lastname || ''}`.trim() || "Host";
-        await HostHistory.create({
+        await HostAuditLog.create({
             type: "profile_update",
             hostId: user._id,
             hostName: hostName,
             changedFields: changedFields,
-            avatarUrl: user.avatar?.url || "",
-            physicalAddress: user.hostDetails?.physicalAddress || "",
-            city: user.hostDetails?.city || "",
-            district: user.hostDetails?.district || "",
-            state: user.hostDetails?.state || "",
-            pincode: user.hostDetails?.pincode || "",
-            phone: user.hostDetails?.phone || "",
-            email: user.email || "",
-            aadhaarCard: user.hostDetails?.aadhaarCard || []
+            snapshot: {
+                avatarUrl: user.avatar?.url || "",
+                physicalAddress: hostDetails?.physicalAddress || "",
+                city: hostDetails?.city || "",
+                district: hostDetails?.district || "",
+                state: hostDetails?.state || "",
+                pincode: hostDetails?.pincode || "",
+                phone: hostDetails?.phone || "",
+                email: user.email || "",
+                aadhaarCard: hostDetails?.aadhaarCard || []
+            }
         });
         
         // Prune to only keep last 10 globally
-        const items = await HostHistory.find({ type: "profile_update" }).sort({ createdAt: -1 });
+        const items = await HostAuditLog.find({ type: "profile_update" }).sort({ createdAt: -1 });
         if (items.length > 10) {
             const idsToDelete = items.slice(10).map(item => item._id);
-            await HostHistory.deleteMany({ _id: { $in: idsToDelete } });
+            await HostAuditLog.deleteMany({ _id: { $in: idsToDelete } });
         }
     } catch (err) {
         console.error("Error saving host old details to history:", err);
     }
 };
 
-function hasPendingHostChanges(user) {
-    if (!user.pendingHostDetails) return false;
-    const pend = typeof user.pendingHostDetails.toObject === 'function' ? user.pendingHostDetails.toObject() : user.pendingHostDetails;
-    const current = user.hostDetails || {};
+function hasPendingHostChanges(user, hostDoc) {
+    if (!hostDoc || !hostDoc.pendingHostDetails) return false;
+    const pend = typeof hostDoc.pendingHostDetails.toObject === 'function' ? hostDoc.pendingHostDetails.toObject() : hostDoc.pendingHostDetails;
+    const current = hostDoc;
     
     if (pend.firstname && pend.firstname.trim() !== (user.firstname || '').trim()) return true;
     if (pend.lastname && pend.lastname.trim() !== (user.lastname || '').trim()) return true;
@@ -72,26 +74,61 @@ function hasPendingHostChanges(user) {
  */
 exports.getPendingHostVerifications = async (req, res) => {
     try {
-        const pendingHosts = await User.find({
+        const pendingHostDocs = await HostDetails.find({
             $or: [
-                { hostStatus: 'pending_approval' },
+                { status: 'pending_approval' },
                 { 
-                    hostStatus: 'approved',
+                    status: 'approved',
                     pendingHostDetails: { $exists: true, $ne: null }
                 }
             ]
         })
-            .select("firstname lastname email avatar description role isVerified location hostDetails pendingHostDetails hostStatus createdAt")
-            .sort({ createdAt: -1 });
+        .populate('user', 'firstname lastname email avatar description role isVerified location createdAt')
+        .sort({ updatedAt: -1 });
 
         // Filter out any host where pendingHostDetails has no actual modified fields
-        const filteredPending = pendingHosts.filter(user => {
-            if (user.hostStatus === 'pending_approval') return true;
-            if (user.hostStatus === 'approved') {
-                return hasPendingHostChanges(user);
+        const filteredPending = [];
+        for (const hostDoc of pendingHostDocs) {
+            if (!hostDoc.user) continue;
+            const user = hostDoc.user;
+            if (hostDoc.status === 'pending_approval') {
+                filteredPending.push({
+                    _id: user._id,
+                    id: user._id,
+                    firstname: user.firstname,
+                    lastname: user.lastname,
+                    email: user.email,
+                    avatar: user.avatar,
+                    description: user.description,
+                    role: user.role,
+                    isVerified: user.isVerified,
+                    location: user.location,
+                    hostStatus: hostDoc.status,
+                    hostDetails: hostDoc,
+                    pendingHostDetails: hostDoc.pendingHostDetails,
+                    createdAt: user.createdAt
+                });
+            } else if (hostDoc.status === 'approved') {
+                if (hasPendingHostChanges(user, hostDoc)) {
+                    filteredPending.push({
+                        _id: user._id,
+                        id: user._id,
+                        firstname: user.firstname,
+                        lastname: user.lastname,
+                        email: user.email,
+                        avatar: user.avatar,
+                        description: user.description,
+                        role: user.role,
+                        isVerified: user.isVerified,
+                        location: user.location,
+                        hostStatus: hostDoc.status,
+                        hostDetails: hostDoc,
+                        pendingHostDetails: hostDoc.pendingHostDetails,
+                        createdAt: user.createdAt
+                    });
+                }
             }
-            return false;
-        });
+        }
 
         return res.status(200).json({
             success: true,
@@ -118,15 +155,20 @@ exports.updateHostVerificationStatus = async (req, res) => {
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-        const pendObj = user.pendingHostDetails 
-            ? (typeof user.pendingHostDetails.toObject === 'function' ? user.pendingHostDetails.toObject() : user.pendingHostDetails) 
+        const hostDoc = await HostDetails.findOne({ user: userId });
+        if (!hostDoc) {
+            return res.status(404).json({ success: false, message: "Host verification record not found" });
+        }
+
+        const pendObj = hostDoc.pendingHostDetails 
+            ? (typeof hostDoc.pendingHostDetails.toObject === 'function' ? hostDoc.pendingHostDetails.toObject() : hostDoc.pendingHostDetails) 
             : null;
-        const isProfileUpdate = user.hostStatus === 'approved' && pendObj && Object.keys(pendObj).length > 0;
+        const isProfileUpdate = hostDoc.status === 'approved' && pendObj && Object.keys(pendObj).length > 0;
 
         if (isProfileUpdate) {
             // Case A: Profile verification details update review
-            const pending = user.pendingHostDetails;
-            const current = user.hostDetails || {};
+            const pending = hostDoc.pendingHostDetails;
+            const current = hostDoc;
             
             const notificationTitle = status === 'approved' ? "Profile Update Approved" : "Profile Update Rejected";
             let notificationMessage = "";
@@ -159,7 +201,7 @@ exports.updateHostVerificationStatus = async (req, res) => {
                 }
                 if (isAadhaarChanging) changedFields.push("aadhaarCard");
 
-                await saveHostOldDetails(user, changedFields);
+                await saveHostOldDetails(user, hostDoc, changedFields);
 
                 // Copy ONLY changed details to active user profile
                 if (changedFields.includes("name")) {
@@ -173,32 +215,30 @@ exports.updateHostVerificationStatus = async (req, res) => {
                     user.avatar = pending.avatar;
                 }
 
-                // Copy proposed details to current details
-                if (!user.hostDetails) user.hostDetails = {};
-                
+                // Copy proposed details to HostDetails
                 if (changedFields.includes("yearsOfExperience") && pending.yearsOfExperience !== undefined) {
-                    user.hostDetails.yearsOfExperience = Number(pending.yearsOfExperience);
+                    hostDoc.yearsOfExperience = Number(pending.yearsOfExperience);
                 }
                 if (changedFields.includes("phone") && pending.phone !== undefined) {
-                    user.hostDetails.phone = pending.phone;
+                    hostDoc.phone = pending.phone;
                 }
                 if (changedFields.includes("physicalAddress") && pending.physicalAddress !== undefined) {
-                    user.hostDetails.physicalAddress = pending.physicalAddress;
+                    hostDoc.physicalAddress = pending.physicalAddress;
                 }
                 if (changedFields.includes("pincode") && pending.pincode !== undefined) {
-                    user.hostDetails.pincode = pending.pincode;
+                    hostDoc.pincode = pending.pincode;
                 }
                 if (changedFields.includes("district") && pending.district !== undefined) {
-                    user.hostDetails.district = pending.district;
+                    hostDoc.district = pending.district;
                 }
                 if (changedFields.includes("state") && pending.state !== undefined) {
-                    user.hostDetails.state = pending.state;
+                    hostDoc.state = pending.state;
                 }
                 if (changedFields.includes("city") && pending.city !== undefined) {
-                    user.hostDetails.city = pending.city;
+                    hostDoc.city = pending.city;
                     if (!user.location) user.location = {};
                     user.location.city = pending.city;
-                    user.location.state = pending.state || user.hostDetails.state || 'Uttarakhand';
+                    user.location.state = pending.state || hostDoc.state || 'Uttarakhand';
                     user.location.country = 'India';
                     user.location.lastUpdated = new Date();
                 } else if (changedFields.includes("state") && pending.state !== undefined) {
@@ -216,13 +256,15 @@ exports.updateHostVerificationStatus = async (req, res) => {
                             await deleteFile(doc.public_id);
                         }
                     }
-                    user.hostDetails.aadhaarCard = approvedAadhaar;
+                    hostDoc.aadhaarCard = approvedAadhaar;
                 }
 
-                user.pendingHostDetails = undefined;
                 user.isVerified = true;
-                user.hostStatus = 'approved';
                 user.role = 'host';
+
+                hostDoc.pendingHostDetails = undefined;
+                await hostDoc.save();
+                await HostDetails.updateOne({ user: userId }, { $unset: { pendingHostDetails: 1 } });
 
                 notificationMessage = "Your profile update review has successfully completed and your details have been updated.";
             } else {
@@ -236,13 +278,14 @@ exports.updateHostVerificationStatus = async (req, res) => {
                         await deleteFile(doc.public_id);
                     }
                 }
-                user.pendingHostDetails = undefined;
+                hostDoc.pendingHostDetails = undefined;
+                await hostDoc.save();
+                await HostDetails.updateOne({ user: userId }, { $unset: { pendingHostDetails: 1 } });
 
                 notificationMessage = `Your profile update review has been rejected. ${reason || "The original details remain unchanged."}`;
             }
 
             await user.save();
-            await User.updateOne({ _id: userId }, { $unset: { pendingHostDetails: 1 } });
 
             // Send notification & real-time emit
             await notificationService.sendNotification({
@@ -255,7 +298,7 @@ exports.updateHostVerificationStatus = async (req, res) => {
             });
 
             notificationService.emitToUser(userId, "host_status_update", {
-                status: user.hostStatus,
+                status: hostDoc.status,
                 message: notificationMessage
             });
 
@@ -290,14 +333,16 @@ exports.updateHostVerificationStatus = async (req, res) => {
         }
 
         // Case B: Initial host verification approval/rejection
-        user.hostStatus = status;
+        hostDoc.status = status;
         if (status === 'approved') {
             user.isVerified = true;
             user.role = 'host';
+            hostDoc.phoneVerified = true;
         }
-        user.pendingHostDetails = undefined;
+        hostDoc.pendingHostDetails = undefined;
+        await hostDoc.save();
+        await HostDetails.updateOne({ user: userId }, { $unset: { pendingHostDetails: 1 } });
         await user.save();
-        await User.updateOne({ _id: userId }, { $unset: { pendingHostDetails: 1 } });
 
         // Create notification
         const notificationTitle = status === 'approved' ? "Host Account Approved" : "Host Account Rejected";

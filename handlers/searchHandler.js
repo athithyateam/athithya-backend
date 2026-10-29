@@ -107,7 +107,7 @@ const searchAll = async (req, res) => {
 
             postResults = await Post.find(postQuery)
                 .select("title subtitle postType photos location price duration difficulty categories discounts isFeatured status rating bookingCount clicks user createdAt")
-                .populate("user", "firstname lastname email avatar role hostStatus verifyBadge")
+                .populate("user", "firstname lastname email avatar role")
                 .sort(sortOptions)
                 .skip(skip)
                 .limit(limitNum)
@@ -314,7 +314,7 @@ const advancedSearch = async (req, res) => {
         const [results, totalCount] = await Promise.all([
             Post.find(query)
                 .select("title subtitle postType photos location price duration difficulty categories discounts isFeatured status rating bookingCount clicks user createdAt")
-                .populate("user", "firstname lastname email avatar role hostStatus verifyBadge")
+                .populate("user", "firstname lastname email avatar role")
                 .sort(sortOptions)
                 .skip(skip)
                 .limit(limitNum)
@@ -467,7 +467,7 @@ const searchByLocation = async (req, res) => {
         const [results, totalCount] = await Promise.all([
             Post.find(query)
                 .select("title subtitle postType photos location price duration difficulty categories discounts isFeatured status rating bookingCount clicks user createdAt")
-                .populate("user", "firstname lastname email avatar role hostStatus verifyBadge")
+                .populate("user", "firstname lastname email avatar role")
                 .sort(sortOptions)
                 .skip(skip)
                 .limit(limitNum)

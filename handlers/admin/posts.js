@@ -1,4 +1,4 @@
-const { Post, Booking, Notification, HostHistory } = require("../../db/mongoose");
+const { Post, Booking, Notification, HostAuditLog } = require("../../db/mongoose");
 const { deleteFile } = require("../../services/storageService");
 const { sendHtmlEmail } = require("../../services/emailService");
 const { notificationService } = require("../../services/notificationService");
@@ -162,36 +162,38 @@ exports.updateExperienceStatus = async (req, res) => {
             if (status === 'active') {
                 const hostId = post.user?._id || post.user;
                 const postTitle = post.title;
-                // ── 1. Archive to HostHistory FIRST (while S3 files still exist) ──
+                // ── 1. Archive to HostAuditLog FIRST (while S3 files still exist) ──
                 try {
                     const hostName = post.user ? `${post.user.firstname} ${post.user.lastname}` : "Unknown Host";
                     
-                    await HostHistory.create({
+                    await HostAuditLog.create({
                         type: "experience_delete",
                         hostId: hostId,
                         hostName: hostName,
-                        experienceTitle: post.title || "",
-                        experienceSubtitle: post.subtitle || "",
-                        experienceDescription: post.description || "",
-                        experienceLongDescription: post.longDescription || "",
-                        experiencePrice: post.price,
-                        experienceDuration: post.duration,
-                        experienceLocation: post.location,
-                        experienceCapacity: post.capacity,
-                        experienceAmenities: post.amenities || [],
-                        experienceRules: post.privacyPolicy || [],
-                        experiencePhotos: post.photos || [],
-                        experienceCategories: post.categories || []
+                        snapshot: {
+                            title: post.title || "",
+                            subtitle: post.subtitle || "",
+                            description: post.description || "",
+                            longDescription: post.longDescription || "",
+                            price: post.price,
+                            duration: post.duration,
+                            location: post.location,
+                            capacity: post.capacity,
+                            amenities: post.amenities || [],
+                            rules: post.privacyPolicy || [],
+                            photos: post.photos || [],
+                            categories: post.categories || []
+                        }
                     });
                     
                     // Prune to only keep last 10 experience_delete records globally
-                    const items = await HostHistory.find({ type: "experience_delete" }).sort({ createdAt: -1 });
+                    const items = await HostAuditLog.find({ type: "experience_delete" }).sort({ createdAt: -1 });
                     if (items.length > 10) {
                         const idsToDelete = items.slice(10).map(item => item._id);
-                        await HostHistory.deleteMany({ _id: { $in: idsToDelete } });
+                        await HostAuditLog.deleteMany({ _id: { $in: idsToDelete } });
                     }
                 } catch (historyErr) {
-                    console.error("Error logging deleted experience to history during admin approval:", historyErr);
+                    console.error("Error logging deleted experience to audit log during admin approval:", historyErr);
                 }
 
                 // ── 2. Now delete S3 assets and bookings ──
@@ -462,12 +464,14 @@ exports.deleteExperience = async (req, res) => {
             { $set: { status: 'cancelled' } }
         );
 
-        // Remove any HostHistory audit records belonging to this host for this experience title
-        // (experience_delete entries for this host that match the title)
-        await HostHistory.deleteMany({
+        // Remove any HostAuditLog audit records belonging to this host for this experience title
+        await HostAuditLog.deleteMany({
             type: "experience_delete",
             hostId: post.user,
-            experienceTitle: post.title
+            $or: [
+                { 'snapshot.title': post.title },
+                { experienceTitle: post.title }
+            ]
         });
 
         await Post.findByIdAndDelete(req.params.id);

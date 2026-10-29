@@ -115,8 +115,8 @@ const checkOptionalAuth = (req, res, next) => {
 // Middleware to check if user is an approved host
 const checkApprovedHost = async (req, res, next) => {
     try {
-        const { User } = require("../db/mongoose");
-        const user = await User.findById(req.user.userId);
+        const { User, HostDetails } = require("../db/mongoose");
+        const user = await User.findById(req.user.userId).select("_id role");
         
         if (!user) {
             return res.status(404).json({ success: false, message: "User not found" });
@@ -128,11 +128,12 @@ const checkApprovedHost = async (req, res, next) => {
             return res.status(403).json({ success: false, message: "Only hosts can perform this action" });
         }
 
-        if (user.hostStatus !== 'approved') {
+        const hostDetails = await HostDetails.findOne({ user: user._id });
+        if (!hostDetails || hostDetails.status !== 'approved') {
             return res.status(403).json({ 
                 success: false, 
                 message: "Your host account is not yet approved.",
-                hostStatus: user.hostStatus
+                hostStatus: hostDetails ? hostDetails.status : 'pending_verification'
             });
         }
 
@@ -155,7 +156,7 @@ const checkAuthWithDBVerification = async (req, res, next) => {
 
         const decoded = authService.verifyToken(token);
         const { User } = require("../db/mongoose");
-        const user = await User.findById(decoded.userId).select("_id role firstname lastname email hostStatus");
+        const user = await User.findById(decoded.userId).select("_id role firstname lastname email");
 
         if (!user) {
             return res.status(401).json({

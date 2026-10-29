@@ -1,4 +1,4 @@
-const { Post, User, Itinerary } = require("../db/mongoose");
+const { Post, User, Itinerary, SavedPost } = require("../db/mongoose");
 const { deleteFile } = require("../services/storageService");
 
 // helper to parse JSON fields sent as strings in form-data
@@ -393,7 +393,11 @@ const saveItinerary = async (req, res) => {
         const itinerary = await (Itinerary || Post).findById(itineraryId);
         if (!itinerary) return res.status(404).json({ success: false, message: "Itinerary not found" });
 
-        await User.findByIdAndUpdate(userId, { $addToSet: { savedPosts: itineraryId } });
+        await SavedPost.findOneAndUpdate(
+            { user: userId, post: itineraryId },
+            { $set: { user: userId, post: itineraryId, postType: 'plan' } },
+            { upsert: true }
+        );
 
         return res.status(200).json({ success: true, message: "Itinerary saved successfully" });
     } catch (err) {
@@ -408,7 +412,7 @@ const unsaveItinerary = async (req, res) => {
         const userId = req.user.userId;
         const itineraryId = req.params.id;
 
-        await User.findByIdAndUpdate(userId, { $pull: { savedPosts: itineraryId } });
+        await SavedPost.deleteOne({ user: userId, post: itineraryId });
 
         return res.status(200).json({ success: true, message: "Itinerary removed from saved list" });
     } catch (err) {

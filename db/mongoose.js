@@ -5,13 +5,18 @@ const Post = require("../models/Post");
 const Review = require("../models/Review");
 const Notification = require("../models/Notification");
 const Booking = require("../models/Booking");
-const Schedule = require("../models/Schedule");
+const GroupBooking = require("../models/GroupBooking");
 const Conversation = require("../models/Conversation");
 const Message = require("../models/Message");
 const CommunityPost = require("../models/CommunityPost");
-const HostHistory = require("../models/HostHistory");
+const HostDetails = require("../models/HostDetails");
+const HostAuditLog = require("../models/HostAuditLog");
 const HostPersonalMedia = require("../models/HostPersonalMedia");
-const GuestSchedule = require("../models/GuestSchedule");
+const HostPinnedExperienceMedia = require("../models/HostPinnedExperienceMedia");
+const WishlistSchedule = require("../models/WishlistSchedule");
+const Friendship = require("../models/Friendship");
+const FriendRequest = require("../models/FriendRequest");
+const SavedPost = require("../models/SavedPost");
 
 const MONGO_URL = process.env.MONGO_URL;
 
@@ -113,4 +118,24 @@ async function connectDB() {
     return cached.conn;
 }
 
-module.exports = { connectDB, User, OTP, Post, Review, Notification, Booking, Schedule, Conversation, Message, CommunityPost, HostHistory, HostPersonalMedia, GuestSchedule };
+module.exports = {
+    connectDB,
+    User,
+    OTP,
+    Post,
+    Review,
+    Notification,
+    Booking,
+    GroupBooking,
+    Conversation,
+    Message,
+    CommunityPost,
+    HostDetails,
+    HostAuditLog,
+    HostPersonalMedia,
+    HostPinnedExperienceMedia,
+    WishlistSchedule,
+    Friendship,
+    FriendRequest,
+    SavedPost
+};

@@ -33,8 +33,8 @@ exports.verifyPayment = async (req, res) => {
             success: true,
             message: "Payment verified and booking confirmed",
             data: result.booking,
-            schedule: result.schedule,
-            scheduleId: result.scheduleId
+            groupBooking: result.groupBooking,
+            groupBookingId: result.groupBookingId
         });
     } catch (error) {
         console.error("Verification error:", error);

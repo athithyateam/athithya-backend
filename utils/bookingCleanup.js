@@ -1,19 +1,19 @@
-const { Schedule, Booking, User } = require("../db/mongoose");
+const { GroupBooking, Booking, User } = require("../db/mongoose");
 const { notificationService } = require("../services/notificationService");
 
-const checkExpiredSchedules = async () => {
+const checkExpiredGroupBookings = async () => {
     try {
         const ONE_HOUR = 60 * 60 * 1000;
         const now = new Date();
 
-        // Find schedules in planning status
-        const schedules = await Schedule.find({
+        // Find group bookings in planning status
+        const groupBookings = await GroupBooking.find({
             status: 'planning',
             isBooked: false,
             initiatorPaid: false
         }).populate('initiator', 'firstname lastname email');
 
-        for (const schedule of schedules) {
+        for (const schedule of groupBookings) {
             // Find paid friends
             const paidFriends = (schedule.invitedPeople || []).filter(p => p.hasPaid);
 
@@ -28,19 +28,19 @@ const checkExpiredSchedules = async () => {
                 continue; // 1 hour window is still active
             }
 
-            console.log(`[CLEANUP] Schedule ${schedule._id} has expired. Initiator failed to pay in time.`);
+            console.log(`[CLEANUP] GroupBooking ${schedule._id} has expired. Initiator failed to pay in time.`);
 
-            // 1. Update schedule status to cancelled
+            // 1. Update group booking status to cancelled
             schedule.status = 'cancelled';
             await schedule.save();
 
             // 2. Process each paid friend's booking
             for (const friend of paidFriends) {
                 try {
-                    // Find the friend's booking associated with this schedule
+                    // Find the friend's booking associated with this group booking
                     const friendBooking = await Booking.findOne({
                         guest: friend.user,
-                        scheduleId: schedule._id,
+                        groupBookingId: schedule._id,
                         paymentStatus: 'paid'
                     }).populate('guest', 'firstname lastname email');
 
@@ -124,8 +124,10 @@ const checkExpiredSchedules = async () => {
             }
         }
     } catch (err) {
-        console.error("Error in checkExpiredSchedules cleanup task:", err);
+        console.error("Error in checkExpiredGroupBookings cleanup task:", err);
     }
 };
 
-module.exports = { checkExpiredSchedules };
+module.exports = {
+    checkExpiredGroupBookings
+};

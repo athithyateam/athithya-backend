@@ -49,7 +49,7 @@ const bookingSchema = new mongoose.Schema({
         booking: { type: mongoose.Schema.Types.ObjectId, ref: 'booking' }
     }],
     parentBookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'booking' },
-    scheduleId: { type: mongoose.Schema.Types.ObjectId, ref: 'schedule' },
+    groupBookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'groupBooking' },
     isInviteBooking: { type: Boolean, default: false },
     walletAmountUsed: { type: Number, default: 0 },
     paidAmount: { type: Number, default: 0 }
@@ -58,7 +58,7 @@ const bookingSchema = new mongoose.Schema({
 bookingSchema.index({ guest: 1, createdAt: -1 });
 bookingSchema.index({ host: 1, status: 1, createdAt: -1 });
 bookingSchema.index({ post: 1, status: 1 });
-bookingSchema.index({ scheduleId: 1 });
+bookingSchema.index({ groupBookingId: 1 });
 
 const Booking = mongoose.model("booking", bookingSchema);
 

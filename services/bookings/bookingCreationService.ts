@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { Booking, Post, User, Schedule } from "../../db/mongoose";
+import { Booking, Post, User, GroupBooking, HostDetails } from "../../db/mongoose";
 import { createRazorpayOrder, verifyRazorpaySignature, fetchPaymentDetails } from "../../utils/razorpay";
 import { sendHtmlEmail, renderBrandedEmail } from "../emailService";
 import { notificationService } from "../notificationService";
@@ -15,6 +15,7 @@ export interface CreateBookingInput {
     guestMessage?: string;
     invitedUserIds?: string[];
     parentBookingId?: string;
+    groupBookingId?: string;
     scheduleId?: string;
     useWallet?: boolean | string;
 }
@@ -137,14 +138,14 @@ export class BookingCreationService {
         return this.instance;
     }
 
-    private async resolveGroupContext(userId: string, count: number, parentBookingId?: string, scheduleId?: string) {
+    private async resolveGroupContext(userId: string, count: number, parentBookingId?: string, groupBookingId?: string) {
         let isInviteBooking = false;
         let effectivePeople = count;
 
-        if (!parentBookingId && !scheduleId) return { isInviteBooking, effectivePeople };
+        if (!parentBookingId && !groupBookingId) return { isInviteBooking, effectivePeople };
 
         let group: any = null;
-        if (scheduleId && mongoose.Types.ObjectId.isValid(scheduleId)) group = await Schedule.findById(scheduleId);
+        if (groupBookingId && mongoose.Types.ObjectId.isValid(groupBookingId)) group = await GroupBooking.findById(groupBookingId);
         else if (parentBookingId && mongoose.Types.ObjectId.isValid(parentBookingId)) group = await Booking.findById(parentBookingId);
         if (!group) return { isInviteBooking, effectivePeople };
 
@@ -180,7 +181,8 @@ export class BookingCreationService {
     }
 
     public async createBooking(data: CreateBookingInput, userId: string, userRole: string): Promise<any> {
-        const { postId, numberOfPeople, startDate, endDate, selectedTime, guestMessage, invitedUserIds, parentBookingId, scheduleId } = data;
+        const { postId, numberOfPeople, startDate, endDate, selectedTime, guestMessage, invitedUserIds, parentBookingId, groupBookingId, scheduleId } = data;
+        const targetGroupBookingId = groupBookingId || scheduleId;
         const peopleCount = Number(numberOfPeople);
 
         if (!postId || isNaN(peopleCount) || peopleCount < 1) {
@@ -213,7 +215,7 @@ export class BookingCreationService {
             validInvited = users.map(u => u._id);
         }
 
-        const { isInviteBooking, effectivePeople } = await this.resolveGroupContext(userId, peopleCount, parentBookingId, scheduleId);
+        const { isInviteBooking, effectivePeople } = await this.resolveGroupContext(userId, peopleCount, parentBookingId, targetGroupBookingId);
         const user = await User.findById(userId);
         const useWallet = data.useWallet === true || data.useWallet === "true";
         const pricing = calculateBookingPricing(post, peopleCount, effectivePeople, useWallet, user?.walletBalance || 0);
@@ -250,7 +252,7 @@ export class BookingCreationService {
             orderId: razorpayOrder ? razorpayOrder.id : null,
             invitedUsers: validInvited,
             parentBookingId: (parentBookingId && mongoose.Types.ObjectId.isValid(parentBookingId)) ? parentBookingId : null,
-            scheduleId: (scheduleId && mongoose.Types.ObjectId.isValid(scheduleId)) ? scheduleId : null,
+            groupBookingId: (targetGroupBookingId && mongoose.Types.ObjectId.isValid(targetGroupBookingId)) ? targetGroupBookingId : null,
             isInviteBooking
         });
 
@@ -286,11 +288,11 @@ export class BookingCreationService {
         try { booking.paymentDetails = await fetchPaymentDetails(razorpay_payment_id); } catch (e) {}
         await booking.save();
 
-        const scheduleResult = await this.processBookingConfirmation(booking);
-        return { booking, schedule: scheduleResult?.schedule || null, scheduleId: booking.scheduleId };
+        const groupResult = await this.processBookingConfirmation(booking);
+        return { booking, groupBooking: groupResult?.groupBooking || null, groupBookingId: booking.groupBookingId };
     }
 
-    public async processBookingConfirmation(booking: any): Promise<{ schedule: any }> {
+    public async processBookingConfirmation(booking: any): Promise<{ groupBooking: any }> {
         const guestId = booking.guest?._id || booking.guest;
         const hostId = booking.host?._id || booking.host;
 
@@ -311,13 +313,17 @@ export class BookingCreationService {
 
         if (hostId) {
             try {
-                const hostUser = await User.findById(hostId);
-                if (hostUser) {
-                    if (!hostUser.verifyBadge) hostUser.verifyBadge = { enabled: false, requiredBookings: 1, successfulBookingsCount: 0 };
-                    hostUser.verifyBadge.successfulBookingsCount = (hostUser.verifyBadge.successfulBookingsCount || 0) + 1;
-                    const reqCount = hostUser.verifyBadge.requiredBookings !== undefined ? hostUser.verifyBadge.requiredBookings : 1;
-                    if (hostUser.verifyBadge.successfulBookingsCount >= reqCount) hostUser.verifyBadge.enabled = true;
-                    await hostUser.save();
+                const hostDoc = await HostDetails.findOneAndUpdate(
+                    { user: hostId },
+                    { $inc: { "verifyBadge.successfulBookingsCount": 1 } },
+                    { new: true, upsert: false }
+                );
+                if (hostDoc) {
+                    const reqCount = hostDoc.verifyBadge?.requiredBookings !== undefined ? hostDoc.verifyBadge.requiredBookings : 1;
+                    const successCount = hostDoc.verifyBadge?.successfulBookingsCount || 0;
+                    if (successCount >= reqCount && !hostDoc.verifyBadge?.enabled) {
+                        await HostDetails.updateOne({ user: hostId }, { $set: { "verifyBadge.enabled": true } });
+                    }
                 }
             } catch (hErr) { console.error("Host badge update error:", hErr); }
         }
@@ -350,11 +356,12 @@ export class BookingCreationService {
             Booking.findByIdAndUpdate(booking.parentBookingId, { $push: { joinedUsers: { user: guestId, booking: booking._id } } }).catch(() => {});
         }
 
-        let scheduleObj: any = null;
+        let groupBookingObj: any = null;
         try {
-            if (booking.scheduleId) {
-                const schedule = await Schedule.findById(booking.scheduleId);
-                const isInitiator = String(schedule.initiator || "").trim() === String(guestId).trim();
+            const groupBookingTargetId = booking.groupBookingId;
+            if (groupBookingTargetId) {
+                const groupBooking = await GroupBooking.findById(groupBookingTargetId);
+                const isInitiator = String(groupBooking?.initiator || "").trim() === String(guestId).trim();
                 const updateData: any = {};
                 const options: any = { new: true };
 
@@ -368,11 +375,11 @@ export class BookingCreationService {
                     updateData["invitedPeople.$[elem].respondedAt"] = new Date();
                     options.arrayFilters = [{ "elem.user": new mongoose.Types.ObjectId(guestId) }];
                 }
-                if (!schedule.bookingId || isInitiator) updateData.bookingId = booking._id;
+                if (!groupBooking?.bookingId || isInitiator) updateData.bookingId = booking._id;
 
-                scheduleObj = await Schedule.findByIdAndUpdate(booking.scheduleId, { $set: updateData }, options).populate("initiator", "firstname lastname avatar");
+                groupBookingObj = await GroupBooking.findByIdAndUpdate(groupBookingTargetId, { $set: updateData }, options).populate("initiator", "firstname lastname avatar");
 
-                const initiatorId = scheduleObj?.initiator?._id || scheduleObj?.initiator;
+                const initiatorId = groupBookingObj?.initiator?._id || groupBookingObj?.initiator;
                 if (initiatorId && String(initiatorId).trim() !== String(guestId).trim()) {
                     const guestUser = await User.findById(guestId, "firstname lastname");
                     const name = guestUser ? `${guestUser.firstname} ${guestUser.lastname}` : "A traveler";
@@ -382,8 +389,8 @@ export class BookingCreationService {
                         title: "Friend Joined!",
                         message: `${name} has successfully booked and joined your group for "${booking.postTitle}"!`,
                         type: "invite_accepted",
-                        link: `/post/${booking.post?._id || booking.post}?scheduleId=${scheduleObj._id}`,
-                        metadata: { scheduleId: scheduleObj._id }
+                        link: `/post/${booking.post?._id || booking.post}?groupBookingId=${groupBookingObj._id}`,
+                        metadata: { groupBookingId: groupBookingObj._id }
                     });
                 }
 
@@ -397,7 +404,7 @@ export class BookingCreationService {
                     metadata: { postId: booking.post?._id || booking.post, bookingId: booking._id }
                 });
             } else {
-                scheduleObj = new Schedule({
+                groupBookingObj = new GroupBooking({
                     initiator: guestId,
                     post: booking.post?._id || booking.post,
                     postType: booking.postType || "experience",
@@ -409,8 +416,8 @@ export class BookingCreationService {
                     initiatorPaid: true,
                     bookingId: booking._id
                 });
-                await scheduleObj.save();
-                booking.scheduleId = scheduleObj._id;
+                await groupBookingObj.save();
+                booking.groupBookingId = groupBookingObj._id;
                 await booking.save();
 
                 await notificationService.sendNotification({
@@ -423,9 +430,9 @@ export class BookingCreationService {
                     metadata: { postId: booking.post?._id || booking.post, bookingId: booking._id }
                 });
             }
-        } catch (schedErr) { console.error("Failed to sync schedule:", schedErr); }
+        } catch (groupErr) { console.error("Failed to sync group booking:", groupErr); }
 
-        return { schedule: scheduleObj };
+        return { groupBooking: groupBookingObj };
     }
 }
 

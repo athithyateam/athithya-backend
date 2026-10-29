@@ -1,16 +1,16 @@
-# Guest Schedules API
+# Wishlist Schedules API
 
-Base prefix: `/api/guest-schedules`
+Base prefix: `/api/wishlist-schedules`
 
-Allows guests to save and schedule specific dates/times for experiences they plan to take. Background workers run hourly reminders for these schedules.
+Allows guests to save and schedule specific dates/times for experiences they plan to take. Background workers run periodic reminders for these wishlist items.
 
 ---
 
 ## Endpoints
 
-### 1. Create or Update Guest Schedule
+### 1. Create or Update Wishlist Schedule
 * **Method**: `POST`
-* **Path**: `/api/guest-schedules`
+* **Path**: `/api/wishlist-schedules`
 * **Auth**: Required (`checkAuth`)
 * **Note**: Hosts cannot schedule experiences; only guests can. Date and time must be in the future.
 * **Request Body** (`application/json`):
@@ -45,9 +45,9 @@ Allows guests to save and schedule specific dates/times for experiences they pla
 
 ---
 
-### 2. Get My Active Scheduled Experiences
+### 2. Get My Active Scheduled Wishlist Items
 * **Method**: `GET`
-* **Path**: `/api/guest-schedules/me`
+* **Path**: `/api/wishlist-schedules/me`
 * **Auth**: Required (`checkAuth`)
 * **Success Response (200)**:
   ```json
@@ -66,9 +66,9 @@ Allows guests to save and schedule specific dates/times for experiences they pla
 
 ---
 
-### 3. Check Schedule Status for Post
+### 3. Check Wishlist Schedule Status for Post
 * **Method**: `GET`
-* **Path**: `/api/guest-schedules/check/:postId`
+* **Path**: `/api/wishlist-schedules/check/:postId`
 * **Auth**: Required (`checkAuth`)
 * **Success Response (200)**:
   ```json
@@ -83,7 +83,7 @@ Allows guests to save and schedule specific dates/times for experiences they pla
 
 ### 4. Delete / Unschedule Experience
 * **Method**: `DELETE`
-* **Path**: `/api/guest-schedules/:id`
+* **Path**: `/api/wishlist-schedules/:id`
 * **Auth**: Required (`checkAuth`)
 * **Success Response (200)**:
   ```json

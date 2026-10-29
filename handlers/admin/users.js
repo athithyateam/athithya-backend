@@ -1,4 +1,4 @@
-const { User, HostHistory, Review, Post, Notification } = require("../../db/mongoose");
+const { User, HostDetails, HostAuditLog, Review, Post, Notification, Friendship, FriendRequest, SavedPost, HostPinnedExperienceMedia, WishlistSchedule } = require("../../db/mongoose");
 
 exports.getAllUsers = async (req, res) => {
     try {
@@ -24,7 +24,7 @@ exports.getAllUsers = async (req, res) => {
         // Parallelize paginated fetch + all three count queries
         const [users, totalUsers, allCount, guestsCount, hostsCount] = await Promise.all([
             User.find(query)
-                .select("-password -savedPosts -likedPosts -bookmarkedItineraries -notifications")
+                .select("-password -likedPosts -bookmarkedItineraries -notifications")
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
@@ -55,7 +55,17 @@ exports.getUserById = async (req, res) => {
     try {
         const user = await User.findById(req.params.id, '-password');
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
-        return res.status(200).json({ success: true, user });
+        const userObj = user.toObject ? user.toObject() : JSON.parse(JSON.stringify(user));
+        if (user.role === 'host') {
+            const hostDoc = await HostDetails.findOne({ user: user._id });
+            if (hostDoc) {
+                userObj.hostDetails = hostDoc;
+                userObj.hostStatus = hostDoc.status;
+                userObj.verifyBadge = hostDoc.verifyBadge;
+                userObj.pendingHostDetails = hostDoc.pendingHostDetails;
+            }
+        }
+        return res.status(200).json({ success: true, user: userObj });
     } catch (error) {
         return res.status(500).json({ success: false, message: "Error fetching user" });
     }
@@ -66,13 +76,16 @@ exports.updateUser = async (req, res) => {
         const updates = req.body;
         delete updates.password;
 
+        const hostUpdates = {};
+
         if (updates.verifyBadge) {
             const reqBookings = Number(updates.verifyBadge.requiredBookings) || 1;
             const successCount = Number(updates.verifyBadge.successfulBookingsCount) || 0;
             
-            updates.verifyBadge.requiredBookings = reqBookings;
-            updates.verifyBadge.successfulBookingsCount = successCount;
-            updates.verifyBadge.enabled = successCount >= reqBookings;
+            hostUpdates['verifyBadge.requiredBookings'] = reqBookings;
+            hostUpdates['verifyBadge.successfulBookingsCount'] = successCount;
+            hostUpdates['verifyBadge.enabled'] = successCount >= reqBookings;
+            delete updates.verifyBadge;
         }
 
         // Sync and validate hostDetails if provided
@@ -83,11 +96,6 @@ exports.updateUser = async (req, res) => {
 
             const existingUser = await User.findById(req.params.id);
             if (existingUser) {
-                updates.hostDetails = {
-                    ...(existingUser.hostDetails ? existingUser.hostDetails.toObject() : {}),
-                    ...updates.hostDetails
-                };
-
                 if (updates.hostDetails.city || updates.hostDetails.state) {
                     const newLocation = {
                         ...(existingUser.location ? existingUser.location.toObject() : {}),
@@ -99,6 +107,19 @@ exports.updateUser = async (req, res) => {
                     updates.location = newLocation;
                 }
             }
+
+            for (const [key, val] of Object.entries(updates.hostDetails)) {
+                hostUpdates[key] = val;
+            }
+            delete updates.hostDetails;
+        }
+
+        if (Object.keys(hostUpdates).length > 0) {
+            await HostDetails.findOneAndUpdate(
+                { user: req.params.id },
+                { $set: hostUpdates },
+                { upsert: true, new: true }
+            );
         }
 
         const user = await User.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true, runValidators: true }).select("-password");
@@ -127,8 +148,9 @@ exports.deleteUser = async (req, res) => {
         const user = await User.findByIdAndDelete(userId);
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-        // Purge all HostHistory audit records for this user (profile_update + experience_delete)
-        await HostHistory.deleteMany({ hostId: userId });
+        // Purge all HostDetails and HostAuditLog audit records for this user
+        await HostDetails.deleteOne({ user: userId });
+        await HostAuditLog.deleteMany({ hostId: userId });
 
         // Delete all Reviews submitted by this user or about this host, and recalculate ratings
         const userSubmittedReviews = await Review.find({ reviewer: userId, post: { $ne: null } });
@@ -155,11 +177,14 @@ exports.deleteUser = async (req, res) => {
         // Clean up notifications
         await Notification.deleteMany({ $or: [{ recipient: userId }, { sender: userId }] });
 
-        // Remove user ID from all friends and friendRequests arrays
-        await User.updateMany(
-            { $or: [{ friends: userId }, { friendRequests: userId }] },
-            { $pull: { friends: userId, friendRequests: userId } }
-        );
+        // Clean up social connections, requests, bookmarks, pins, and wishlist schedules via indexed collections
+        await Promise.all([
+            Friendship.deleteMany({ $or: [{ user: userId }, { friend: userId }] }),
+            FriendRequest.deleteMany({ $or: [{ sender: userId }, { recipient: userId }] }),
+            SavedPost.deleteMany({ user: userId }),
+            HostPinnedExperienceMedia.deleteMany({ user: userId }),
+            WishlistSchedule.deleteMany({ user: userId })
+        ]);
 
         res.json({ success: true, message: "User deleted successfully" });
     } catch (err) {

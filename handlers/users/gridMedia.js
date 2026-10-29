@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const { User, Post, HostPersonalMedia } = require("../../db/mongoose");
+const { User, Post, HostPersonalMedia, HostPinnedExperienceMedia } = require("../../db/mongoose");
 const { deleteFile } = require("../../services/storageService");
 const { notificationService } = require("../../services/notificationService");
 
@@ -10,12 +10,13 @@ exports.getHostGridMedia = async (req, res) => {
             return res.status(400).json({ success: false, message: "Invalid user ID format" });
         }
 
-        const user = await User.findById(userId).select("pinnedExperienceMedia activeGridTab role");
+        const user = await User.findById(userId).select("role");
         if (!user) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        const pinnedExperienceKeys = user.pinnedExperienceMedia || [];
+        const pinnedDocs = await HostPinnedExperienceMedia.find({ user: userId }).select("mediaKey");
+        const pinnedExperienceKeys = pinnedDocs.map(d => d.mediaKey);
 
         // 1. Fetch experience posts media (from active experience/service/trek posts)
         const posts = await Post.find({ user: userId, status: "active" }).sort({ createdAt: -1 });
@@ -82,7 +83,7 @@ exports.getHostGridMedia = async (req, res) => {
             data: {
                 experienceMedia,
                 personalMedia,
-                activeGridTab: user.activeGridTab || "experience"
+                activeGridTab: "experience"
             }
         });
     } catch (error) {
@@ -100,22 +101,16 @@ exports.updateGridTabPreference = async (req, res) => {
             return res.status(400).json({ success: false, message: "Invalid grid tab preference" });
         }
 
-        const user = await User.findByIdAndUpdate(
-            userId,
-            { activeGridTab },
-            { new: true }
-        ).select("activeGridTab");
-
         // Broadcast real-time grid tab preference update via NotificationService
         notificationService.emitToAll("host_grid_tab_updated", {
             hostId: userId,
-            activeGridTab: user.activeGridTab
+            activeGridTab
         });
 
         return res.status(200).json({
             success: true,
             message: "Grid tab preference updated",
-            data: { activeGridTab: user.activeGridTab }
+            data: { activeGridTab }
         });
     } catch (error) {
         console.error("Error updating grid tab preference:", error);
@@ -238,32 +233,24 @@ exports.togglePinExperienceMedia = async (req, res) => {
             return res.status(400).json({ success: false, message: "mediaKey is required" });
         }
 
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ success: false, message: "User not found" });
-        }
-
-        if (!Array.isArray(user.pinnedExperienceMedia)) {
-            user.pinnedExperienceMedia = [];
-        }
-
-        const index = user.pinnedExperienceMedia.indexOf(mediaKey);
+        const existingPin = await HostPinnedExperienceMedia.findOne({ user: userId, mediaKey });
         let isPinned = false;
 
-        if (index > -1) {
-            user.pinnedExperienceMedia.splice(index, 1);
+        if (existingPin) {
+            await HostPinnedExperienceMedia.deleteOne({ _id: existingPin._id });
             isPinned = false;
         } else {
-            user.pinnedExperienceMedia.push(mediaKey);
+            await HostPinnedExperienceMedia.create({ user: userId, mediaKey, pinnedAt: new Date() });
             isPinned = true;
         }
 
-        await user.save();
+        const allPinnedDocs = await HostPinnedExperienceMedia.find({ user: userId }).select("mediaKey");
+        const pinnedKeys = allPinnedDocs.map(d => d.mediaKey);
 
         return res.status(200).json({
             success: true,
             isPinned,
-            pinnedExperienceMedia: user.pinnedExperienceMedia,
+            pinnedExperienceMedia: pinnedKeys,
             message: isPinned ? "Experience media pinned" : "Experience media unpinned"
         });
     } catch (error) {

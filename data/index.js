@@ -2,16 +2,21 @@ const mongoose = require("../db/mongoose");
 const Booking = require("../models/Booking");
 const CommunityPost = require("../models/CommunityPost");
 const Conversation = require("../models/Conversation");
-const GuestSchedule = require("../models/GuestSchedule");
-const HostHistory = require("../models/HostHistory");
+const FriendRequest = require("../models/FriendRequest");
+const Friendship = require("../models/Friendship");
+const GroupBooking = require("../models/GroupBooking");
+const HostAuditLog = require("../models/HostAuditLog");
+const HostDetails = require("../models/HostDetails");
 const HostPersonalMedia = require("../models/HostPersonalMedia");
+const HostPinnedExperienceMedia = require("../models/HostPinnedExperienceMedia");
 const Message = require("../models/Message");
 const Notification = require("../models/Notification");
 const OTP = require("../models/OTP");
 const Post = require("../models/Post");
 const Review = require("../models/Review");
-const Schedule = require("../models/Schedule");
+const SavedPost = require("../models/SavedPost");
 const User = require("../models/User");
+const WishlistSchedule = require("../models/WishlistSchedule");
 
 module.exports = {
   ...mongoose,
@@ -19,15 +24,20 @@ module.exports = {
     Booking,
     CommunityPost,
     Conversation,
-    GuestSchedule,
-    HostHistory,
+    FriendRequest,
+    Friendship,
+    GroupBooking,
+    HostAuditLog,
+    HostDetails,
     HostPersonalMedia,
+    HostPinnedExperienceMedia,
     Message,
     Notification,
     OTP,
     Post,
     Review,
-    Schedule,
+    SavedPost,
     User,
+    WishlistSchedule,
   },
 };

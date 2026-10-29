@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import axios from "axios";
 import jwt from "jsonwebtoken";
-import { User, Conversation, Message } from "../db/mongoose";
+import { User, Conversation, Message, HostDetails } from "../db/mongoose";
 import { sendTemplateEmail, sendHtmlEmail, renderBrandedEmail } from "./emailService";
 import { otpService as defaultOtpService, OtpService } from "./otpService";
 import { notificationService } from "./notificationService";
@@ -52,6 +52,7 @@ export interface EmailNotifier {
 
 export interface AuthDependencies {
     userModel?: any;
+    hostDetailsModel?: any;
     otpService?: OtpService;
     otpModel?: any;
     conversationModel?: any;
@@ -67,6 +68,7 @@ export default class AuthService {
     private static instanceKey = Symbol("AuthServiceInstanceKey");
 
     private userModel: any;
+    private hostDetailsModel: any;
     private otpService: OtpService;
     private conversationModel: any;
     private messageModel: any;
@@ -81,6 +83,7 @@ export default class AuthService {
         }
 
         this.userModel = deps.userModel || User;
+        this.hostDetailsModel = deps.hostDetailsModel || HostDetails;
         this.otpService = deps.otpService || (deps.otpModel ? OtpService.getInstance({ otpModel: deps.otpModel }) : defaultOtpService);
         this.conversationModel = deps.conversationModel || Conversation;
         this.messageModel = deps.messageModel || Message;
@@ -372,12 +375,18 @@ export default class AuthService {
     public async getCurrentUser(userId: string): Promise<any> {
         if (!userId) httpError(400, "User ID is required");
 
-        const user = await this.userModel.findById(userId).select("-password -otp -otpExpires");
+        const user = await this.userModel.findById(userId).select("-password");
         if (!user) httpError(401, "User session invalid or user not found");
+
+        let hostStatus: string | undefined = undefined;
+        if (user.role === "host") {
+            const hostDoc = await this.hostDetailsModel.findOne({ user: user._id });
+            hostStatus = hostDoc ? hostDoc.status : "pending_verification";
+        }
 
         return {
             ...this.formatAuthUser(user),
-            hostStatus: user.hostStatus || (user.role === "host" ? "pending_verification" : undefined),
+            hostStatus,
             phone: user.phone || "",
             bio: user.bio || "",
             location: user.location || null

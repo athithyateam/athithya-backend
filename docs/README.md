@@ -59,8 +59,8 @@ Most endpoints conform to standard JSON responses:
 | **Itineraries (Plans)** | `/api/itineraries` | [itineraries.md](./itineraries.md) |
 | **Search & Geocoding** | `/api/search` | [search.md](./search.md) |
 | **Notifications** | `/api/notifications` | [notifications.md](./notifications.md) |
-| **Group Schedules** | `/api/schedules` | [schedules.md](./schedules.md) |
-| **Guest Experience Schedules** | `/api/guest-schedules` | [guest-schedules.md](./guest-schedules.md) |
+| **Group Bookings** | `/api/group-bookings` | [group-bookings.md](./group-bookings.md) |
+| **Wishlist Schedules** | `/api/wishlist-schedules` | [wishlist-schedules.md](./wishlist-schedules.md) |
 | **Real-time Chat & Group Plans** | `/api/chat` | [chat.md](./chat.md) |
 | **Admin Operations** | `/api/admin` | [admin.md](./admin.md) |
 | **Google Analytics** | `/api/analytics` | [analytics.md](./analytics.md) |
