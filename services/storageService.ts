@@ -1,4 +1,5 @@
 import S3StorageProvider, { StorageProvider, StorageUploadResult, PresignedUrlResult } from "./storage/s3Provider";
+import { NotImplementedError } from "../errors";
 
 export { StorageProvider, StorageUploadResult, PresignedUrlResult, S3StorageProvider };
 
@@ -56,9 +57,7 @@ export class StorageService {
         type?: string
     ): Promise<PresignedUrlResult> {
         if (!this.provider.generatePresignedUploadUrl || typeof this.provider.generatePresignedUploadUrl !== "function") {
-            const error: any = new Error("Current storage provider does not support pre-signed upload URLs");
-            error.statusCode = 501;
-            throw error;
+            throw new NotImplementedError("Current storage provider does not support pre-signed upload URLs");
         }
         return await this.provider.generatePresignedUploadUrl(filenameOrOptions, fileType, fileSize, type);
     }

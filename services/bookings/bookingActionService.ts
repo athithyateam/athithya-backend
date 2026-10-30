@@ -1,4 +1,5 @@
 const { Booking, User } = require("../../db/mongoose");
+import { BadRequestError, NotFoundError, ForbiddenError } from "../../errors";
 import { sendHtmlEmail, renderBrandedEmail } from "../emailService";
 import { otpService } from "../otpService";
 import { notificationService } from "../notificationService";
@@ -134,9 +135,7 @@ export class BookingActionService {
             .populate("experience", "title photos location price");
 
         if (!booking) {
-            const err: any = new Error("Booking not found");
-            err.statusCode = 404;
-            throw err;
+            throw new NotFoundError("Booking not found");
         }
 
         const guestIdStr = String(booking.guest?._id || booking.guest).trim();
@@ -144,9 +143,7 @@ export class BookingActionService {
         const requesterStr = String(userId).trim();
 
         if (guestIdStr !== requesterStr && hostIdStr !== requesterStr) {
-            const err: any = new Error("You are not authorized to view this booking");
-            err.statusCode = 403;
-            throw err;
+            throw new ForbiddenError("You are not authorized to view this booking");
         }
 
         const result = booking.toObject();
@@ -158,9 +155,9 @@ export class BookingActionService {
 
     public async acceptBooking(bookingId: string, hostId: string, hostResponse: string = ""): Promise<any> {
         const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email").populate("experience", "title");
-        if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
-        if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
-        if (booking.status !== "pending") { const err: any = new Error(`Cannot accept ${booking.status} booking`); err.statusCode = 400; throw err; }
+        if (!booking) { throw new NotFoundError("Booking not found"); }
+        if (booking.host.toString() !== hostId.toString()) { throw new ForbiddenError("Unauthorized"); }
+        if (booking.status !== "pending") { throw new BadRequestError(`Cannot accept ${booking.status} booking`); }
 
         booking.status = "accepted";
         booking.hostResponse = hostResponse || "";
@@ -199,9 +196,9 @@ export class BookingActionService {
 
     public async declineBooking(bookingId: string, hostId: string, hostResponse: string = ""): Promise<any> {
         const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email").populate("experience", "title");
-        if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
-        if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
-        if (booking.status !== "pending") { const err: any = new Error(`Cannot decline ${booking.status} booking`); err.statusCode = 400; throw err; }
+        if (!booking) { throw new NotFoundError("Booking not found"); }
+        if (booking.host.toString() !== hostId.toString()) { throw new ForbiddenError("Unauthorized"); }
+        if (booking.status !== "pending") { throw new BadRequestError(`Cannot decline ${booking.status} booking`); }
 
         booking.status = "declined";
         booking.hostResponse = hostResponse || "";
@@ -240,8 +237,8 @@ export class BookingActionService {
 
     public async requestCancellation(bookingId: string, guestId: string, reason: string = "No reason provided"): Promise<any> {
         const booking: any = await this.bookingModel.findById(bookingId);
-        if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
-        if (booking.guest.toString() !== guestId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
+        if (!booking) { throw new NotFoundError("Booking not found"); }
+        if (booking.guest.toString() !== guestId.toString()) { throw new ForbiddenError("Unauthorized"); }
 
         booking.status = "cancel_requested";
         booking.cancellationReason = reason || "No reason provided";
@@ -261,8 +258,8 @@ export class BookingActionService {
 
     public async approveCancellation(bookingId: string, hostId: string): Promise<any> {
         const booking: any = await this.bookingModel.findById(bookingId);
-        if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
-        if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
+        if (!booking) { throw new NotFoundError("Booking not found"); }
+        if (booking.host.toString() !== hostId.toString()) { throw new ForbiddenError("Unauthorized"); }
 
         booking.status = "cancelled";
         booking.paymentStatus = "refund_pending";
@@ -282,9 +279,9 @@ export class BookingActionService {
 
     public async sendStartOTP(bookingId: string, hostId: string): Promise<any> {
         const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email");
-        if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
-        if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
-        if (booking.status !== "accepted") { const err: any = new Error("Booking must be accepted to start the journey"); err.statusCode = 400; throw err; }
+        if (!booking) { throw new NotFoundError("Booking not found"); }
+        if (booking.host.toString() !== hostId.toString()) { throw new ForbiddenError("Unauthorized"); }
+        if (booking.status !== "accepted") { throw new BadRequestError("Booking must be accepted to start the journey"); }
 
         const expTitle = booking.experienceTitle;
         const { otp, expiresAt } = await otpService.sendBookingJourneyOTP({
@@ -301,9 +298,9 @@ export class BookingActionService {
 
     public async verifyStartOTP(bookingId: string, hostId: string, otp: string): Promise<any> {
         const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email").populate("host", "firstname lastname email");
-        if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
-        if (booking.host._id.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
-        if (booking.status !== "accepted") { const err: any = new Error("Booking must be accepted to verify experience start"); err.statusCode = 400; throw err; }
+        if (!booking) { throw new NotFoundError("Booking not found"); }
+        if (booking.host._id.toString() !== hostId.toString()) { throw new ForbiddenError("Unauthorized"); }
+        if (booking.status !== "accepted") { throw new BadRequestError("Booking must be accepted to verify experience start"); }
 
         otpService.verifyTimedOTP(booking.startOTP, booking.startOTPExpiresAt, otp);
 
@@ -333,9 +330,9 @@ export class BookingActionService {
 
     public async sendCompletionOTP(bookingId: string, hostId: string): Promise<any> {
         const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email");
-        if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
-        if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
-        if (booking.status !== "in_progress") { const err: any = new Error("Experience journey must be in progress to complete it"); err.statusCode = 400; throw err; }
+        if (!booking) { throw new NotFoundError("Booking not found"); }
+        if (booking.host.toString() !== hostId.toString()) { throw new ForbiddenError("Unauthorized"); }
+        if (booking.status !== "in_progress") { throw new BadRequestError("Experience journey must be in progress to complete it"); }
 
         const expTitle = booking.experienceTitle;
         const { otp, expiresAt } = await otpService.sendBookingJourneyOTP({
@@ -352,9 +349,9 @@ export class BookingActionService {
 
     public async verifyCompletionOTP(bookingId: string, hostId: string, otp: string): Promise<any> {
         const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email").populate("host", "firstname lastname email");
-        if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
-        if (booking.host._id.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
-        if (booking.status !== "in_progress") { const err: any = new Error("Experience journey must be active to verify completion"); err.statusCode = 400; throw err; }
+        if (!booking) { throw new NotFoundError("Booking not found"); }
+        if (booking.host._id.toString() !== hostId.toString()) { throw new ForbiddenError("Unauthorized"); }
+        if (booking.status !== "in_progress") { throw new BadRequestError("Experience journey must be active to verify completion"); }
 
         otpService.verifyTimedOTP(booking.completionOTP, booking.completionOTPExpiresAt, otp);
 
@@ -404,8 +401,8 @@ export class BookingActionService {
 
     public async acceptOrphanedBooking(bookingId: string, hostId: string): Promise<any> {
         const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email").populate("experience", "title");
-        if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
-        if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
+        if (!booking) { throw new NotFoundError("Booking not found"); }
+        if (booking.host.toString() !== hostId.toString()) { throw new ForbiddenError("Unauthorized"); }
 
         booking.status = "accepted";
         await booking.save();
@@ -434,8 +431,8 @@ export class BookingActionService {
 
     public async rejectOrphanedBooking(bookingId: string, hostId: string): Promise<any> {
         const booking: any = await this.bookingModel.findById(bookingId).populate("guest").populate("experience", "title");
-        if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
-        if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
+        if (!booking) { throw new NotFoundError("Booking not found"); }
+        if (booking.host.toString() !== hostId.toString()) { throw new ForbiddenError("Unauthorized"); }
 
         booking.status = "cancelled";
         booking.paymentStatus = "refunded";

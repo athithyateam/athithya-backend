@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { BadRequestError, NotFoundError, ForbiddenError } from "../../errors";
 const { Booking, Experience, User, GroupBooking, HostDetails } = require("../../db/mongoose");
 import { createRazorpayOrder, verifyRazorpaySignature, fetchPaymentDetails } from "../../utils/razorpay";
 import { sendHtmlEmail, renderBrandedEmail } from "../emailService";
@@ -189,9 +190,7 @@ export class BookingCreationService {
             isInviteBooking = true;
             const myInvite = (group.invitedPeople || []).find((inv: any) => String(inv.user?._id || inv.user) === String(userId));
             if (myInvite?.status === "pending" && (Date.now() - new Date(myInvite.invitedAt).getTime()) > 3600000) {
-                const err: any = new Error("Your invitation has expired. Please ask the initiator to re-invite you.");
-                err.statusCode = 403;
-                throw err;
+                throw new ForbiddenError("Your invitation has expired. Please ask the initiator to re-invite you.");
             }
         }
 
@@ -199,9 +198,7 @@ export class BookingCreationService {
         if (isInitiator) {
             const unpaid = (group.invitedPeople || []).filter((p: any) => !p.hasPaid);
             if (unpaid.length > 0) {
-                const err: any = new Error(`Cannot complete booking. Waiting for ${unpaid.length} invited friend(s) to pay first.`);
-                err.statusCode = 400;
-                throw err;
+                throw new BadRequestError(`Cannot complete booking. Waiting for ${unpaid.length} invited friend(s) to pay first.`);
             }
             const paidCount = (group.invitedPeople || []).filter((p: any) => p?.hasPaid).length || (group.joinedUsers || []).length;
             effectivePeople = hostCount + paidCount;
@@ -220,28 +217,22 @@ export class BookingCreationService {
         const peopleCount = Number(numberOfPeople);
 
         if (!experienceId || isNaN(peopleCount) || peopleCount < 1) {
-            const err: any = new Error("Experience ID and a valid number of people (minimum 1) are required");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Experience ID and a valid number of people (minimum 1) are required");
         }
         if (peopleCount > 3) {
-            const err: any = new Error("Maximum 3 travelers allowed per booking");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Maximum 3 travelers allowed per booking");
         }
 
         const experience = await this.experienceModel.findById(experienceId).populate("user");
-        if (!experience) { const err: any = new Error("Experience not found"); err.statusCode = 404; throw err; }
+        if (!experience) { throw new NotFoundError("Experience not found"); }
         if (experience.status !== "active" && experience.status !== "pending") {
-            const err: any = new Error("This experience is not available for booking");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("This experience is not available for booking");
         }
 
         const hostId = experience.user?._id || experience.user;
-        if (!hostId) { const err: any = new Error("This experience has no valid host assigned"); err.statusCode = 400; throw err; }
-        if (String(hostId) === String(userId)) { const err: any = new Error("You cannot book your own experience"); err.statusCode = 400; throw err; }
-        if (userRole === "host") { const err: any = new Error("Hosts cannot engage with another host's experience. Only guests can."); err.statusCode = 400; throw err; }
+        if (!hostId) { throw new BadRequestError("This experience has no valid host assigned"); }
+        if (String(hostId) === String(userId)) { throw new BadRequestError("You cannot book your own experience"); }
+        if (userRole === "host") { throw new BadRequestError("Hosts cannot engage with another host's experience. Only guests can."); }
 
         let validInvited: any[] = [];
         if (Array.isArray(invitedUserIds) && invitedUserIds.length > 0) {
@@ -296,21 +287,17 @@ export class BookingCreationService {
     public async verifyPayment(data: VerifyPaymentInput, userId: string): Promise<any> {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature, bookingId } = data;
         if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !bookingId) {
-            const err: any = new Error("Missing payment verification details");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Missing payment verification details");
         }
 
         if (!verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
-            const err: any = new Error("Payment verification failed");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Payment verification failed");
         }
 
         const booking = await this.bookingModel.findById(bookingId).populate("experience").populate("guest").populate("host");
-        if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
-        if (booking.orderId !== razorpay_order_id) { const err: any = new Error("Payment signature order ID mismatch"); err.statusCode = 400; throw err; }
-        if (booking.guest._id.toString() !== userId.toString()) { const err: any = new Error("Unauthorized payment verification"); err.statusCode = 403; throw err; }
+        if (!booking) { throw new NotFoundError("Booking not found"); }
+        if (booking.orderId !== razorpay_order_id) { throw new BadRequestError("Payment signature order ID mismatch"); }
+        if (booking.guest._id.toString() !== userId.toString()) { throw new ForbiddenError("Unauthorized payment verification"); }
 
         booking.status = "accepted";
         booking.paymentStatus = "paid";

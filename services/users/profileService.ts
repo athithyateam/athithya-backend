@@ -10,6 +10,7 @@ import { sendTemplateEmail } from "../emailService";
 import { notificationService } from "../notificationService";
 import { normalizePhoneNumber, renderDocumentListHtml } from "./verificationService";
 import { reviewService as defaultReviewService, ReviewService } from "../reviewService";
+import { BadRequestError, NotFoundError } from "../../errors";
 
 export interface LocationData {
     latitude: number | string;
@@ -252,9 +253,7 @@ export class ProfileService {
     public async getUserById(targetUserId: string, currentUserId?: string, currentUserRole?: string): Promise<any> {
         const user = await this.userModel.findById(targetUserId).select('-password');
         if (!user) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         const currentUserIdStr = currentUserId?.toString();
@@ -271,9 +270,7 @@ export class ProfileService {
     public async updateUserLocation(userId: string, locationData: LocationData): Promise<any> {
         const { latitude, longitude, address, city, state, country } = locationData;
         if (!latitude || !longitude) {
-            const error: any = new Error("Coordinates required");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Coordinates required");
         }
 
         const updatedUser = await this.userModel.findByIdAndUpdate(
@@ -293,9 +290,7 @@ export class ProfileService {
         ).select('-password');
 
         if (!updatedUser) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         return {
@@ -310,9 +305,7 @@ export class ProfileService {
     public async getUserLocation(userId: string): Promise<any> {
         const user = await this.userModel.findById(userId).select('location role firstname lastname');
         if (!user) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         return {
@@ -329,9 +322,7 @@ export class ProfileService {
     public async getSavedExperiences(userId: string): Promise<any[]> {
         const userExists = await this.userModel.exists({ _id: userId });
         if (!userExists) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         const savedDocs = await this.savedExperienceModel.find({ user: userId })
@@ -353,9 +344,7 @@ export class ProfileService {
     public async addSavedExperience(userId: string, experienceId: string): Promise<boolean> {
         const userExists = await this.userModel.exists({ _id: userId });
         if (!userExists) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         const existing = await this.savedExperienceModel.findOne({
@@ -375,9 +364,7 @@ export class ProfileService {
     public async removeSavedExperience(userId: string, experienceId: string): Promise<boolean> {
         const userExists = await this.userModel.exists({ _id: userId });
         if (!userExists) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         const result = await this.savedExperienceModel.deleteOne({
@@ -400,9 +387,7 @@ export class ProfileService {
         currentUserRole?: string
     ): Promise<any> {
         if (!mongoose.Types.ObjectId.isValid(userId)) {
-            const error: any = new Error("Invalid user ID format");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Invalid user ID format");
         }
 
         const pageNum = parseInt(String(page), 10) || 1;
@@ -411,9 +396,7 @@ export class ProfileService {
 
         const user = await this.userModel.findById(userId).select('-password');
         if (!user) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         const isOwner = currentUserId && String(currentUserId) === String(userId);
@@ -476,16 +459,12 @@ export class ProfileService {
         currentUserRole?: string
     ): Promise<any> {
         if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-            const error: any = new Error("Invalid user ID format");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Invalid user ID format");
         }
 
         const user = await this.userModel.findById(userId).select('-password');
         if (!user) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         const experiences = await this.experienceModel.find({ user: userId, status: 'active' }).sort({ createdAt: -1 });
@@ -660,19 +639,17 @@ export class ProfileService {
 
         const user = await this.userModel.findById(userId);
         if (!user) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         const hostDoc = user.role === "host" ? await this.hostDetailsModel.findOne({ user: userId }) : null;
 
         // Rule 1: Unverified hosts cannot update any profile details
         if (user.role === "host" && (!hostDoc || hostDoc.status !== "approved")) {
-            const error: any = new Error("You cannot update your profile until your host account is verified and approved by an admin. If you have already submitted for verification, please wait for admin approval.");
-            error.statusCode = 400;
-            error.isUnverifiedHost = true;
-            throw error;
+            throw new BadRequestError(
+                "You cannot update your profile until your host account is verified and approved by an admin. If you have already submitted for verification, please wait for admin approval.",
+                { isUnverifiedHost: true }
+            );
         }
 
         const currentDetails = hostDoc || {};
@@ -723,9 +700,7 @@ export class ProfileService {
                 const normPhone = normalizePhoneNumber(phone);
                 const normTemp = normalizePhoneNumber(currentDetails.tempVerifiedPhone || '');
                 if (!normTemp || normPhone !== normTemp) {
-                    const error: any = new Error("Please verify your updated phone number first using OTP");
-                    error.statusCode = 400;
-                    throw error;
+                    throw new BadRequestError("Please verify your updated phone number first using OTP");
                 }
                 isVerifChanging = true;
             }
@@ -891,9 +866,7 @@ export class ProfileService {
     public async deleteAccount(userId: string): Promise<void> {
         const user = await this.userModel.findById(userId);
         if (!user) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         // 1. Delete Avatar from S3

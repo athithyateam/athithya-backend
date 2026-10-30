@@ -5,6 +5,7 @@
  */
 
 import axios from "axios";
+import { BadRequestError } from "../errors";
 
 export interface ParsedAddress {
     state?: string;
@@ -147,17 +148,13 @@ export class GeocodingService {
      */
     public async reverseGeocode(lat: string | number, lon: string | number): Promise<any> {
         if (lat == null || lon == null || lat === "" || lon === "") {
-            const err: any = new Error("Latitude and longitude are required");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Latitude and longitude are required");
         }
 
         const latNum = parseFloat(String(lat));
         const lonNum = parseFloat(String(lon));
         if (isNaN(latNum) || isNaN(lonNum) || latNum < -90 || latNum > 90 || lonNum < -180 || lonNum > 180) {
-            const err: any = new Error("Latitude must be between -90 and 90, and longitude between -180 and 180");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Latitude must be between -90 and 90, and longitude between -180 and 180");
         }
 
         const apiKey = this.apiKey || process.env.GOOGLE_MAPS_API_KEY;
@@ -194,9 +191,7 @@ export class GeocodingService {
      */
     public async geocodeSearch(query: string, options: GeocodeSearchOptions = {}): Promise<any> {
         if (!query || typeof query !== "string" || !query.trim()) {
-            const err: any = new Error("Query parameter 'q' is required");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Query parameter 'q' is required");
         }
 
         const apiKey = this.apiKey || process.env.GOOGLE_MAPS_API_KEY;

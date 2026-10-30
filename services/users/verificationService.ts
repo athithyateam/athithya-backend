@@ -3,6 +3,7 @@ import { parseIfJson } from "../experiences/experiencePayloadParser";
 import { sendTemplateEmail } from "../emailService";
 import { notificationService } from "../notificationService";
 import { otpService as defaultOtpService, OtpService, normalizePhoneNumber } from "../otpService";
+import { BadRequestError, NotFoundError } from "../../errors";
 
 export { normalizePhoneNumber };
 
@@ -103,9 +104,7 @@ export class VerificationService {
         const existingHost = await this.hostDetailsModel.findOne(query);
 
         if (existingHost) {
-            const error: any = new Error("This phone number has already been used, please try another number");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("This phone number has already been used, please try another number");
         }
     }
 
@@ -132,9 +131,7 @@ export class VerificationService {
         // 2. Domain logic: Update host profile with verified phone
         const user = await this.userModel.findById(userId);
         if (!user) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         const hostDetails = await this.hostDetailsModel.findOne({ user: userId });
@@ -173,25 +170,19 @@ export class VerificationService {
         const { phone, physicalAddress, pincode, city, district, state, yearsOfExperience, aadhaar, aadhaarCardData: providedAadhaar } = data;
 
         if (!phone || !physicalAddress || !pincode || !city || !district || !state) {
-            const error: any = new Error("Phone, current address, pincode, city, district, and state are required");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Phone, current address, pincode, city, district, and state are required");
         }
 
         const normalizedPhone = this.normalizePhoneNumber(phone);
         const user = await this.userModel.findById(userId);
         if (!user) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         // Enforce phone OTP verification
         const hostDetails = await this.hostDetailsModel.findOne({ user: userId });
         if (!hostDetails || !hostDetails.phoneVerified || hostDetails.phone !== normalizedPhone) {
-            const error: any = new Error("Please verify your phone number via OTP first");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Please verify your phone number via OTP first");
         }
 
         let aadhaarCardData: any[] = [];

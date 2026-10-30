@@ -1,5 +1,6 @@
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
+import { BadRequestError } from "../../errors";
 const { DeleteObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { Upload } = require("@aws-sdk/lib-storage");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -128,9 +129,7 @@ export class S3StorageProvider implements StorageProvider {
         }
 
         if (!name || !mime) {
-            const error: any = new Error("filename and fileType are required");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("filename and fileType are required");
         }
 
         const allowedTypes = [
@@ -139,17 +138,13 @@ export class S3StorageProvider implements StorageProvider {
         ];
 
         if (!allowedTypes.includes(mime.toLowerCase())) {
-            const error: any = new Error("Invalid file type. Only standard images, videos, and PDF documents are allowed.");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Invalid file type. Only standard images, videos, and PDF documents are allowed.");
         }
 
         if (size) {
             const sizeLimit = mime.toLowerCase().startsWith("video") ? 20 * 1024 * 1024 : 10 * 1024 * 1024;
             if (Number(size) > sizeLimit) {
-                const error: any = new Error(`File size exceeds the limit. Maximum allowed is ${mime.toLowerCase().startsWith("video") ? "20MB for videos" : "10MB for photos/documents"}.`);
-                error.statusCode = 400;
-                throw error;
+                throw new BadRequestError(`File size exceeds the limit. Maximum allowed is ${mime.toLowerCase().startsWith("video") ? "20MB for videos" : "10MB for photos/documents"}.`);
             }
         }
 

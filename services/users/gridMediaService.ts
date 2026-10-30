@@ -9,6 +9,7 @@ const { User, Experience, HostPersonalMedia, HostPinnedExperienceMedia } = requi
 import { deleteFile as defaultDeleteFile } from "../storageService";
 import { notificationService as defaultNotificationService } from "../notificationService";
 const { googleDriveService: defaultGoogleDriveService } = require("../googleDriveService");
+import { BadRequestError, NotFoundError } from "../../errors";
 
 export interface MediaItemInput {
     url: string;
@@ -98,16 +99,12 @@ export class GridMediaService {
      */
     public async getHostGridMedia(userId: string): Promise<HostGridMediaResult> {
         if (!mongoose.Types.ObjectId.isValid(userId)) {
-            const error: any = new Error("Invalid user ID format");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Invalid user ID format");
         }
 
         const user = await this.userModel.findById(userId).select("role");
         if (!user) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         const pinnedDocs = await this.pinnedMediaModel.find({ user: userId }).select("mediaKey");
@@ -183,9 +180,7 @@ export class GridMediaService {
      */
     public async updateGridTabPreference(userId: string, activeGridTab: string): Promise<{ activeGridTab: string }> {
         if (!["experience", "personal"].includes(activeGridTab)) {
-            const error: any = new Error("Invalid grid tab preference");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Invalid grid tab preference");
         }
 
         this.notificationSvc.emitToAll("host_grid_tab_updated", {
@@ -201,9 +196,7 @@ export class GridMediaService {
      */
     public async addPersonalMedia(userId: string, items: MediaItemInput[]): Promise<any[]> {
         if (!Array.isArray(items) || items.length === 0) {
-            const error: any = new Error("Please provide at least one media item to upload");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Please provide at least one media item to upload");
         }
 
         const mediaToInsert = items.map((item) => ({
@@ -248,9 +241,7 @@ export class GridMediaService {
     public async deletePersonalMedia(userId: string, mediaId: string): Promise<void> {
         const media = await this.personalMediaModel.findOne({ _id: mediaId, user: userId });
         if (!media) {
-            const error: any = new Error("Personal media not found or unauthorized");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("Personal media not found or unauthorized");
         }
 
         if (media.public_id) {
@@ -274,9 +265,7 @@ export class GridMediaService {
     public async togglePinPersonalMedia(userId: string, mediaId: string): Promise<{ isPinned: boolean }> {
         const media = await this.personalMediaModel.findOne({ _id: mediaId, user: userId });
         if (!media) {
-            const error: any = new Error("Personal media not found or unauthorized");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("Personal media not found or unauthorized");
         }
 
         media.isPinned = !media.isPinned;
@@ -294,9 +283,7 @@ export class GridMediaService {
         mediaKey: string
     ): Promise<{ isPinned: boolean; pinnedExperienceMedia: string[] }> {
         if (!mediaKey) {
-            const error: any = new Error("mediaKey is required");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("mediaKey is required");
         }
 
         const existingPin = await this.pinnedMediaModel.findOne({ user: userId, mediaKey });

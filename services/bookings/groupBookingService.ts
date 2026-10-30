@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { BadRequestError, ForbiddenError, NotFoundError } from "../../errors";
 const { GroupBooking, Booking, Experience, User, Notification } = require("../../db/mongoose");
 
 export interface FriendInviteInput {
@@ -72,23 +73,17 @@ export class GroupBookingService {
     public async sendFriendInvite(initiatorUserId: string, input: FriendInviteInput, io?: any): Promise<any> {
         const initiator = await this.userModel.findById(initiatorUserId);
         if (!initiator) {
-            const err: any = new Error("User not found");
-            err.statusCode = 404;
-            throw err;
+            throw new NotFoundError("User not found");
         }
 
         if (initiator.role === 'host') {
-            const err: any = new Error("Hosts cannot engage with another host's experience. Only guests can.");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Hosts cannot engage with another host's experience. Only guests can.");
         }
 
         const expId = input.experienceId;
         const experience = await this.experienceModel.findById(expId);
         if (!experience) {
-            const err: any = new Error("Experience not found");
-            err.statusCode = 404;
-            throw err;
+            throw new NotFoundError("Experience not found");
         }
 
         let targetIds: string[] = [];
@@ -99,9 +94,7 @@ export class GroupBookingService {
         }
 
         if (targetIds.length === 0) {
-            const err: any = new Error("No friends selected");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("No friends selected");
         }
 
         let groupBooking = null;
@@ -109,9 +102,7 @@ export class GroupBookingService {
         if (targetBookingId && mongoose.Types.ObjectId.isValid(targetBookingId)) {
             groupBooking = await this.groupBookingModel.findById(targetBookingId);
             if (groupBooking && String(groupBooking.initiator) !== String(initiatorUserId)) {
-                const err: any = new Error("Only the group initiator can invite friends to this group");
-                err.statusCode = 403;
-                throw err;
+                throw new ForbiddenError("Only the group initiator can invite friends to this group");
             }
         }
 
@@ -132,15 +123,11 @@ export class GroupBookingService {
         const newInvitesCount = targetIds.filter(fId => !groupBooking.invitedPeople.some((inv: any) => String(inv.user) === String(fId))).length;
 
         if (currentInvitedCount + newInvitesCount > 2) {
-            const err: any = new Error("You can invite a maximum of 2 friends");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("You can invite a maximum of 2 friends");
         }
 
         if (initiatorCount + currentInvitedCount + newInvitesCount > 3) {
-            const err: any = new Error("Total group size (travelers + invited friends) cannot exceed 3");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Total group size (travelers + invited friends) cannot exceed 3");
         }
 
         for (const fId of targetIds) {
@@ -188,9 +175,7 @@ export class GroupBookingService {
             status: 'planning'
         });
         if (!groupBooking) {
-            const err: any = new Error("Group booking not found");
-            err.statusCode = 404;
-            throw err;
+            throw new NotFoundError("Group booking not found");
         }
 
         groupBooking.invitedPeople = groupBooking.invitedPeople.filter((p: any) => String(p.user?._id || p.user) !== String(friendId));
@@ -236,38 +221,28 @@ export class GroupBookingService {
     public async createGroupBooking(initiatorUserId: string, input: CreateGroupBookingInput, io?: any): Promise<any> {
         const initiator = await this.userModel.findById(initiatorUserId);
         if (!initiator) {
-            const err: any = new Error("User not found");
-            err.statusCode = 404;
-            throw err;
+            throw new NotFoundError("User not found");
         }
 
         if (initiator.role === 'host') {
-            const err: any = new Error("Hosts cannot engage with another host's experience. Only guests can.");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Hosts cannot engage with another host's experience. Only guests can.");
         }
 
         const expId = input.experienceId;
         const experience = await this.experienceModel.findById(expId);
         if (!experience) {
-            const err: any = new Error("Experience not found");
-            err.statusCode = 404;
-            throw err;
+            throw new NotFoundError("Experience not found");
         }
 
         const validUsers = await this.userModel.find({ _id: { $in: input.invitedUserIds }, role: { $ne: 'host' } });
         const numTravelers = Number(input.numberOfPeople || 1);
 
         if (validUsers.length > 2) {
-            const err: any = new Error("You can invite a maximum of 2 friends");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("You can invite a maximum of 2 friends");
         }
 
         if (numTravelers + validUsers.length > 3) {
-            const err: any = new Error("Total group size (travelers + invited friends) cannot exceed 3");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Total group size (travelers + invited friends) cannot exceed 3");
         }
 
         const invitedPeople = validUsers.map((u: any) => ({
@@ -309,16 +284,12 @@ export class GroupBookingService {
     public async respondToInvite(userId: string, groupBookingId: string, status: string, io?: any): Promise<any> {
         const groupBooking = await this.groupBookingModel.findById(groupBookingId);
         if (!groupBooking) {
-            const err: any = new Error("Group booking not found");
-            err.statusCode = 404;
-            throw err;
+            throw new NotFoundError("Group booking not found");
         }
 
         const inviteIndex = groupBooking.invitedPeople.findIndex((inv: any) => inv.user.toString() === userId.toString());
         if (inviteIndex === -1) {
-            const err: any = new Error("Unauthorized");
-            err.statusCode = 403;
-            throw err;
+            throw new ForbiddenError("Unauthorized");
         }
 
         groupBooking.invitedPeople[inviteIndex].status = status;
@@ -436,9 +407,7 @@ export class GroupBookingService {
         if (!groupBooking) return true; // Idempotent
 
         if (String(groupBooking.initiator) !== String(currentUserId)) {
-            const err: any = new Error("Forbidden: only the initiator can cancel the session");
-            err.statusCode = 403;
-            throw err;
+            throw new ForbiddenError("Forbidden: only the initiator can cancel the session");
         }
 
         await this.groupBookingModel.findByIdAndDelete(groupBookingId);
@@ -451,29 +420,21 @@ export class GroupBookingService {
     public async updateGroupBooking(groupBookingId: string, currentUserId: string, numberOfPeople: number): Promise<any> {
         const groupBooking = await this.groupBookingModel.findById(groupBookingId);
         if (!groupBooking) {
-            const err: any = new Error("Group booking not found");
-            err.statusCode = 404;
-            throw err;
+            throw new NotFoundError("Group booking not found");
         }
 
         if (String(groupBooking.initiator) !== String(currentUserId)) {
-            const err: any = new Error("Only the initiator can update the group booking");
-            err.statusCode = 403;
-            throw err;
+            throw new ForbiddenError("Only the initiator can update the group booking");
         }
 
         const num = Number(numberOfPeople);
         if (isNaN(num) || num < 1) {
-            const err: any = new Error("Invalid traveler count");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Invalid traveler count");
         }
 
         const invitedCount = groupBooking.invitedPeople?.length || 0;
         if (num + invitedCount > 3) {
-            const err: any = new Error("Total group size (travelers + invited friends) cannot exceed 3");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Total group size (travelers + invited friends) cannot exceed 3");
         }
 
         groupBooking.numberOfPeople = num;

@@ -1,5 +1,6 @@
 import { User, Notification, Conversation, Message, Friendship, FriendRequest } from "../../db/mongoose";
 import { notificationService } from "../notificationService";
+import { BadRequestError, NotFoundError } from "../../errors";
 
 export class SocialService {
     private static instance: SocialService | null = null;
@@ -73,31 +74,23 @@ export class SocialService {
      */
     public async sendFriendRequest(targetUserId: string, currentUserId: string): Promise<boolean> {
         if (targetUserId === currentUserId) {
-            const error: any = new Error("Can't friend yourself");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Can't friend yourself");
         }
 
         const currentUser = await this.userModel.findById(currentUserId).select("firstname lastname");
         if (!currentUser) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         const targetUser = await this.userModel.findById(targetUserId).select("_id");
         if (!targetUser) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         // Check if already friends via dedicated Friendship collection (O(1) indexed check)
         const areFriends = await this.friendshipModel.exists({ user: currentUserId, friend: targetUserId });
         if (areFriends) {
-            const error: any = new Error("Already friends");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Already friends");
         }
 
         // Check if request already pending
@@ -107,9 +100,7 @@ export class SocialService {
             status: "pending"
         });
         if (existingReq) {
-            const error: any = new Error("Request already sent");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Request already sent");
         }
 
         // Upsert friend request record
@@ -145,9 +136,7 @@ export class SocialService {
         });
 
         if (!pendingRequest) {
-            const error: any = new Error("No request found");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("No request found");
         }
 
         // Remove the friend request
@@ -269,9 +258,7 @@ export class SocialService {
     public async getFriends(userId: string, page: number | string = 1, limit: number | string = 20): Promise<{ count: number; data: any[] }> {
         const userExists = await this.userModel.exists({ _id: userId });
         if (!userExists) {
-            const error: any = new Error("User not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("User not found");
         }
 
         const pageNum = Math.max(1, parseInt(String(page), 10) || 1);

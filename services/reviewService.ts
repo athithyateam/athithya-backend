@@ -5,6 +5,7 @@
  */
 
 import mongoose from "mongoose";
+import { BadRequestError, NotFoundError, ForbiddenError } from "../errors";
 const { Review, User, Experience, Booking } = require("../db/mongoose");
 
 export interface ReviewData {
@@ -119,30 +120,22 @@ export class ReviewService {
 
     private validateObjectId(id: any, name: string): mongoose.Types.ObjectId {
         if (!id || typeof id !== "string" || id.trim() === "") {
-            const error: any = new Error(`${name} is required`);
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError(`${name} is required`);
         }
         const cleanId = id.trim();
         if (!mongoose.Types.ObjectId.isValid(cleanId)) {
-            const error: any = new Error(`Invalid ${name.charAt(0).toLowerCase() + name.slice(1)} format`);
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError(`Invalid ${name.charAt(0).toLowerCase() + name.slice(1)} format`);
         }
         return new mongoose.Types.ObjectId(cleanId);
     }
 
     private validateRating(rating: any): number {
         if (rating === undefined || rating === null) {
-            const error: any = new Error("Rating is required");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Rating is required");
         }
         const ratingNum = Number(rating);
         if (isNaN(ratingNum) || !Number.isFinite(ratingNum) || ratingNum < 1 || ratingNum > 5) {
-            const error: any = new Error("Rating must be a number between 1 and 5");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Rating must be a number between 1 and 5");
         }
         return Math.round(ratingNum);
     }
@@ -151,9 +144,7 @@ export class ReviewService {
         if (comment === undefined || comment === null) return "";
         const trimmed = String(comment).trim();
         if (trimmed.length > 1000) {
-            const error: any = new Error("Comment cannot exceed 1000 characters");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Comment cannot exceed 1000 characters");
         }
         return trimmed;
     }
@@ -325,9 +316,7 @@ export class ReviewService {
         const expQuery = this.experienceModel.findById(expObjectId);
         const experience = await (typeof expQuery?.select === "function" ? expQuery.select("_id user") : expQuery);
         if (!experience) {
-            const error: any = new Error("Experience not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("Experience not found");
         }
 
         const hasCompleted = await this.bookingModel.findOne({
@@ -385,9 +374,7 @@ export class ReviewService {
         data: ReviewData
     ): Promise<{ review: any; isUpdate: boolean }> {
         if (reviewerRole === "host") {
-            const error: any = new Error("Hosts cannot engage with another host's experience. Only guests can.");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Hosts cannot engage with another host's experience. Only guests can.");
         }
 
         let { hostId, experienceId, rating, comment } = data || {};
@@ -400,16 +387,12 @@ export class ReviewService {
         if (validExperienceId) {
             const experience = await this.experienceModel.findById(validExperienceId);
             if (!experience) {
-                const error: any = new Error("Experience not found");
-                error.statusCode = 404;
-                throw error;
+                throw new NotFoundError("Experience not found");
             }
 
             const expHostId = experience.user.toString();
             if (hostId && hostId.toString() !== expHostId) {
-                const error: any = new Error("This experience does not belong to the specified host");
-                error.statusCode = 400;
-                throw error;
+                throw new BadRequestError("This experience does not belong to the specified host");
             }
             if (!hostId) {
                 hostId = expHostId;
@@ -417,33 +400,23 @@ export class ReviewService {
 
             const eligibility = await this.checkReviewEligibility(reviewerId, reviewerRole, validExperienceId);
             if (!eligibility.eligible) {
-                const error: any = new Error(eligibility.message || "Not eligible to review this experience");
-                error.statusCode = 403;
-                throw error;
+                throw new ForbiddenError(eligibility.message || "Not eligible to review this experience");
             }
         }
 
         if (!hostId || !mongoose.Types.ObjectId.isValid(hostId)) {
-            const error: any = new Error("Valid host ID or experience ID is required");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Valid host ID or experience ID is required");
         }
 
         const host = await this.userModel.findById(hostId);
         if (!host) {
-            const error: any = new Error("Host not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("Host not found");
         }
         if (host.role !== "host") {
-            const error: any = new Error("Reviews can only be given to hosts");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("Reviews can only be given to hosts");
         }
         if (reviewerId && reviewerId.toString() === hostId.toString()) {
-            const error: any = new Error("You cannot review yourself");
-            error.statusCode = 400;
-            throw error;
+            throw new BadRequestError("You cannot review yourself");
         }
 
         const finalRating = this.validateRating(rating);
@@ -614,9 +587,7 @@ export class ReviewService {
 
         const review = await (typeof query?.lean === "function" ? query.lean() : query);
         if (!review) {
-            const error: any = new Error("Review not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("Review not found");
         }
         return review;
     }
@@ -632,15 +603,11 @@ export class ReviewService {
         const objId = this.validateObjectId(reviewId, "Review ID");
         const review = await this.reviewModel.findById(objId);
         if (!review) {
-            const error: any = new Error("Review not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("Review not found");
         }
 
         if (review.reviewer.toString() !== userId) {
-            const error: any = new Error("You can only edit your own reviews");
-            error.statusCode = 403;
-            throw error;
+            throw new ForbiddenError("You can only edit your own reviews");
         }
 
         if (data.rating !== undefined && data.rating !== null) {
@@ -674,15 +641,11 @@ export class ReviewService {
         const objId = this.validateObjectId(reviewId, "Review ID");
         const review = await this.reviewModel.findById(objId);
         if (!review) {
-            const error: any = new Error("Review not found");
-            error.statusCode = 404;
-            throw error;
+            throw new NotFoundError("Review not found");
         }
 
         if (review.reviewer.toString() !== userId && userRole !== "admin") {
-            const error: any = new Error("You can only delete your own reviews");
-            error.statusCode = 403;
-            throw error;
+            throw new ForbiddenError("You can only delete your own reviews");
         }
 
         const experienceId = review.experience ? review.experience.toString() : null;

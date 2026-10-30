@@ -7,15 +7,11 @@ import { otpService as defaultOtpService, OtpService } from "./otpService";
 import { notificationService } from "./notificationService";
 import { chatService } from "./chatService";
 
+import { BadRequestError, NotFoundError, UnauthorizedError } from "../errors";
+
 const defaultJwtSecret = process.env.JWT_SECRET || "";
 if (!defaultJwtSecret && process.env.NODE_ENV === "production") {
     throw new Error("JWT_SECRET environment variable is required but not set.");
-}
-
-function httpError(statusCode: number, message: string): never {
-    const error: any = new Error(message);
-    error.statusCode = statusCode;
-    throw error;
 }
 
 export interface FormattedAuthUser {
@@ -105,7 +101,7 @@ export default class AuthService {
     public validateRole(role?: string): string {
         const userRole = role || "guest";
         if (!["guest", "host"].includes(userRole)) {
-            httpError(400, "Invalid role. Only 'guest' or 'host' accounts can be registered.");
+            throw new BadRequestError("Invalid role. Only 'guest' or 'host' accounts can be registered.");
         }
         return userRole;
     }
@@ -248,9 +244,9 @@ export default class AuthService {
     }
 
     public async initiateSignup(email: string, role?: string): Promise<{ email: string }> {
-        if (!email) httpError(400, "Email is required");
+        if (!email) throw new BadRequestError("Email is required");
         const existingUser = await this.userModel.findOne({ email });
-        if (existingUser) httpError(400, "Email already registered");
+        if (existingUser) throw new BadRequestError("Email already registered");
 
         this.validateRole(role);
         await this.generateAndSendOTP(email);
@@ -265,10 +261,10 @@ export default class AuthService {
         role?: string,
         otp?: string
     ): Promise<AuthResponse> {
-        if (!email || !password || !otp) httpError(400, "Email, password, and OTP are required");
+        if (!email || !password || !otp) throw new BadRequestError("Email, password, and OTP are required");
 
         const existingUser = await this.userModel.findOne({ email });
-        if (existingUser) httpError(400, "User already exists");
+        if (existingUser) throw new BadRequestError("User already exists");
 
         const userRole = this.validateRole(role);
         await this.verifyAndConsumeOTP(email, otp);
@@ -292,11 +288,11 @@ export default class AuthService {
     }
 
     public async signin(email: string, password: string): Promise<AuthResponse> {
-        if (!email || !password) httpError(400, "Email and password are required");
+        if (!email || !password) throw new BadRequestError("Email and password are required");
 
         const user = await this.userModel.findOne({ email });
         if (!user || !(await bcrypt.compare(password, user.password))) {
-            httpError(400, "Invalid credentials");
+            throw new BadRequestError("Invalid credentials");
         }
 
         const token = this.generateAuthToken(user);
@@ -307,7 +303,7 @@ export default class AuthService {
     }
 
     public async googleSignin(token: string, role?: string): Promise<AuthResponse> {
-        if (!token) httpError(400, "Google access token is required");
+        if (!token) throw new BadRequestError("Google access token is required");
 
         const userRole = this.validateRole(role);
         const googleRes = await axios.get("https://www.googleapis.com/oauth2/v3/userinfo", {
@@ -340,20 +336,20 @@ export default class AuthService {
     }
 
     public async forgotPassword(email: string): Promise<boolean> {
-        if (!email) httpError(400, "Email is required");
+        if (!email) throw new BadRequestError("Email is required");
 
         const user = await this.userModel.findOne({ email });
-        if (!user) httpError(404, "No account found with this email address");
+        if (!user) throw new NotFoundError("No account found with this email address");
 
         await this.generateAndSendOTP(email, "Password Reset - OTP", "Password Reset Request");
         return true;
     }
 
     public async resetPassword(email: string, otp: string, newPassword: string): Promise<boolean> {
-        if (!email || !otp || !newPassword) httpError(400, "Email, OTP, and new password are required");
+        if (!email || !otp || !newPassword) throw new BadRequestError("Email, OTP, and new password are required");
 
         const user = await this.userModel.findOne({ email });
-        if (!user) httpError(404, "No account found with this email address");
+        if (!user) throw new NotFoundError("No account found with this email address");
 
         await this.verifyAndConsumeOTP(email, otp);
 
@@ -364,10 +360,10 @@ export default class AuthService {
     }
 
     public async getCurrentUser(userId: string): Promise<any> {
-        if (!userId) httpError(400, "User ID is required");
+        if (!userId) throw new BadRequestError("User ID is required");
 
         const user = await this.userModel.findById(userId).select("-password");
-        if (!user) httpError(401, "User session invalid or user not found");
+        if (!user) throw new UnauthorizedError("User session invalid or user not found");
 
         let hostStatus: string | undefined = undefined;
         if (user.role === "host") {

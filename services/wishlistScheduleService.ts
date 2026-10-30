@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { BadRequestError, NotFoundError } from "../errors";
 const { WishlistSchedule, Experience, User } = require("../db/mongoose");
 
 export interface ScheduleWishlistInput {
@@ -50,24 +51,18 @@ export class WishlistScheduleService {
      */
     public async scheduleWishlistItem(userId: string, userRole: string, input: ScheduleWishlistInput): Promise<any> {
         if (userRole === 'host') {
-            const err: any = new Error("Hosts cannot schedule experiences. Only guests can.");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Hosts cannot schedule experiences. Only guests can.");
         }
 
         const expId = input.experienceId;
         const { scheduledDate, scheduledTime } = input;
         if (!expId || !scheduledDate || !scheduledTime) {
-            const err: any = new Error("Experience ID, date, and time are required");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Experience ID, date, and time are required");
         }
 
         const experience = await this.experienceModel.findById(expId);
         if (!experience) {
-            const err: any = new Error("Experience not found");
-            err.statusCode = 404;
-            throw err;
+            throw new NotFoundError("Experience not found");
         }
 
         const [year, month, day] = scheduledDate.split('-').map(Number);
@@ -75,15 +70,11 @@ export class WishlistScheduleService {
         const targetDateTime = new Date(year, month - 1, day, hours, minutes, 0, 0);
 
         if (isNaN(targetDateTime.getTime())) {
-            const err: any = new Error("Invalid date or time format");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Invalid date or time format");
         }
 
         if (targetDateTime <= new Date()) {
-            const err: any = new Error("Scheduled date and time must be in the future");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Scheduled date and time must be in the future");
         }
 
         let schedule = await this.wishlistScheduleModel.findOne({ user: userId, $or: [{ experience: expId }, { post: expId }] });
@@ -148,9 +139,7 @@ export class WishlistScheduleService {
         });
 
         if (!schedule) {
-            const err: any = new Error("Scheduled experience not found");
-            err.statusCode = 404;
-            throw err;
+            throw new NotFoundError("Scheduled experience not found");
         }
 
         await this.wishlistScheduleModel.findByIdAndDelete(id);

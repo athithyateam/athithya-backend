@@ -1,4 +1,5 @@
 import { Conversation, Message, User, Booking } from "../db/mongoose";
+import { BadRequestError, NotFoundError, ForbiddenError } from "../errors";
 const { storageService: defaultStorageService } = require("./storageService");
 import {
     checkChatEligibility,
@@ -75,9 +76,9 @@ export class ChatService {
 
     public async getChatEligibility(conversationId: string, userId: string): Promise<ChatEligibilityResult> {
         const conv = await this.conversationModel.findById(conversationId);
-        if (!conv) throw Object.assign(new Error("Conversation not found"), { statusCode: 404 });
+        if (!conv) throw new NotFoundError("Conversation not found");
         if (!conv.participants.some((p: any) => String(p._id || p) === String(userId))) {
-            throw Object.assign(new Error("Unauthorized: You are not a participant in this conversation"), { statusCode: 403 });
+            throw new ForbiddenError("Unauthorized: You are not a participant in this conversation");
         }
         if (conv.isGroup) return { canChat: true };
 
@@ -93,19 +94,19 @@ export class ChatService {
 
     public async getMessages(conversationId: string, userId: string): Promise<any[]> {
         const conv = await this.conversationModel.findById(conversationId);
-        if (!conv) throw Object.assign(new Error("Conversation not found"), { statusCode: 404 });
+        if (!conv) throw new NotFoundError("Conversation not found");
         if (!conv.participants.some((p: any) => p.toString() === userId.toString())) {
-            throw Object.assign(new Error("Unauthorized: You are not a participant in this conversation"), { statusCode: 403 });
+            throw new ForbiddenError("Unauthorized: You are not a participant in this conversation");
         }
         return this.messageModel.find({ conversationId }).sort({ createdAt: 1 }).populate("sender", "firstname lastname avatar");
     }
 
     public async getOrCreateConversation(senderId: string, recipientId: string): Promise<any> {
-        if (String(senderId) === String(recipientId)) throw Object.assign(new Error("Cannot start a chat with yourself"), { statusCode: 400 });
+        if (String(senderId) === String(recipientId)) throw new BadRequestError("Cannot start a chat with yourself");
 
         const eligibility = await this.checkEligibility(senderId, recipientId);
         if (!eligibility.canChat) {
-            throw Object.assign(new Error(eligibility.reason || "You are not eligible to start a conversation with this user."), { statusCode: 403, eligibility });
+            throw new ForbiddenError(eligibility.reason || "You are not eligible to start a conversation with this user.", { eligibility });
         }
 
         let conv = await this.conversationModel.findOne({
@@ -127,7 +128,7 @@ export class ChatService {
         let parsed: any[] = [];
         try { parsed = typeof participantIds === "string" ? JSON.parse(participantIds) : participantIds; } catch { parsed = participantIds as any[]; }
 
-        if (!name || !parsed || !Array.isArray(parsed)) throw Object.assign(new Error("Name and participants are required"), { statusCode: 400 });
+        if (!name || !parsed || !Array.isArray(parsed)) throw new BadRequestError("Name and participants are required");
 
         const participants = [...new Set([...parsed.map(id => id.toString()), adminId.toString()])];
         let avatarData = undefined;
@@ -158,8 +159,8 @@ export class ChatService {
 
     public async updateGroup(conversationId: string, userId: string, payload: UpdateGroupPayload, file?: any): Promise<any> {
         const conv = await this.conversationModel.findById(conversationId);
-        if (!conv || !conv.isGroup) throw Object.assign(new Error("Group not found"), { statusCode: 404 });
-        if (String(conv.groupMetadata?.admin) !== String(userId)) throw Object.assign(new Error("Only admin can update group details"), { statusCode: 403 });
+        if (!conv || !conv.isGroup) throw new NotFoundError("Group not found");
+        if (String(conv.groupMetadata?.admin) !== String(userId)) throw new ForbiddenError("Only admin can update group details");
 
         const updates: any = {};
         if (payload.name) updates["groupMetadata.name"] = payload.name;
@@ -175,8 +176,8 @@ export class ChatService {
 
     public async leaveGroup(conversationId: string, userId: string): Promise<any> {
         const conv = await this.conversationModel.findById(conversationId);
-        if (!conv || !conv.isGroup) throw Object.assign(new Error("Group not found"), { statusCode: 404 });
-        if (!conv.participants.some((p: any) => String(p) === String(userId))) throw Object.assign(new Error("You are not a member of this group"), { statusCode: 403 });
+        if (!conv || !conv.isGroup) throw new NotFoundError("Group not found");
+        if (!conv.participants.some((p: any) => String(p) === String(userId))) throw new ForbiddenError("You are not a member of this group");
 
         const updatedParticipants = conv.participants.filter((p: any) => String(p) !== String(userId));
         if (updatedParticipants.length === 0) {
@@ -208,9 +209,9 @@ export class ChatService {
 
     public async deleteConversation(conversationId: string, userId: string): Promise<{ success: boolean; message: string }> {
         const conv = await this.conversationModel.findById(conversationId);
-        if (!conv) throw Object.assign(new Error("Conversation not found"), { statusCode: 404 });
-        if (!conv.participants.some((p: any) => String(p) === String(userId))) throw Object.assign(new Error("Unauthorized to delete this conversation"), { statusCode: 403 });
-        if (conv.isGroup && String(conv.groupMetadata?.admin) !== String(userId)) throw Object.assign(new Error("Only admin can delete the group plan"), { statusCode: 403 });
+        if (!conv) throw new NotFoundError("Conversation not found");
+        if (!conv.participants.some((p: any) => String(p) === String(userId))) throw new ForbiddenError("Unauthorized to delete this conversation");
+        if (conv.isGroup && String(conv.groupMetadata?.admin) !== String(userId)) throw new ForbiddenError("Only admin can delete the group plan");
 
         if (conv.groupMetadata?.avatar?.public_id) {
             try { await this.storageService.deleteFile(conv.groupMetadata.avatar.public_id); } catch (e) {}
@@ -222,7 +223,7 @@ export class ChatService {
 
     public async clearConversation(conversationId: string, userId: string): Promise<{ success: boolean; message: string }> {
         const conv = await this.conversationModel.findOne({ _id: conversationId, participants: userId });
-        if (!conv) throw Object.assign(new Error("Conversation not found"), { statusCode: 404 });
+        if (!conv) throw new NotFoundError("Conversation not found");
 
         await this.messageModel.deleteMany({ conversationId });
         const resetUnread: Record<string, number> = {};
@@ -237,15 +238,15 @@ export class ChatService {
     public async sendMessage(senderId: string, payload: SendMessagePayload): Promise<any> {
         const { conversationId, text, recipientId, messageType = "text", locationData, attachments } = payload;
         const conv = await this.conversationModel.findById(conversationId);
-        if (!conv) throw Object.assign(new Error("Conversation not found"), { statusCode: 404 });
+        if (!conv) throw new NotFoundError("Conversation not found");
         if (!conv.participants.some((p: any) => p.toString() === senderId.toString())) {
-            throw Object.assign(new Error("Unauthorized: You are not a participant in this conversation"), { statusCode: 403 });
+            throw new ForbiddenError("Unauthorized: You are not a participant in this conversation");
         }
 
         if (!conv.isGroup) {
             const targetUserId = recipientId || conv.participants.find((p: any) => String(p) !== String(senderId));
             const eligibility = await this.checkEligibility(senderId, targetUserId);
-            if (!eligibility.canChat) throw Object.assign(new Error(eligibility.reason || "Chat is disabled."), { statusCode: 403, eligibility });
+            if (!eligibility.canChat) throw new ForbiddenError(eligibility.reason || "Chat is disabled.", { eligibility });
         }
 
         let parsedAttachments: any[] = [];
@@ -303,8 +304,8 @@ export class ChatService {
 
     public async markConversationAsRead(conversationId: string, userId: string): Promise<void> {
         const conv = await this.conversationModel.findById(conversationId);
-        if (!conv) throw Object.assign(new Error("Conversation not found"), { statusCode: 404 });
-        if (!conv.participants.some((p: any) => p.toString() === userId.toString())) throw Object.assign(new Error("Unauthorized access"), { statusCode: 403 });
+        if (!conv) throw new NotFoundError("Conversation not found");
+        if (!conv.participants.some((p: any) => p.toString() === userId.toString())) throw new ForbiddenError("Unauthorized access");
 
         const query: any = { conversationId, read: false };
         if (!conv.isGroup) query.recipient = userId;
@@ -316,8 +317,8 @@ export class ChatService {
 
     public async deleteMessage(messageId: string, userId: string): Promise<void> {
         const message = await this.messageModel.findById(messageId);
-        if (!message) throw Object.assign(new Error("Message not found"), { statusCode: 404 });
-        if (message.sender.toString() !== String(userId)) throw Object.assign(new Error("Unauthorized to delete this message"), { statusCode: 403 });
+        if (!message) throw new NotFoundError("Message not found");
+        if (message.sender.toString() !== String(userId)) throw new ForbiddenError("Unauthorized to delete this message");
         await this.messageModel.findByIdAndDelete(messageId);
     }
 

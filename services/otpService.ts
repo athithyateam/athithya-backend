@@ -1,12 +1,7 @@
 import { OTP } from "../db/mongoose";
 import { emailService as defaultEmailService, EmailService } from "./emailService";
+import { BadRequestError, InternalServerError } from "../errors";
 const brevo = require("@getbrevo/brevo");
-
-function httpError(statusCode: number, message: string): never {
-    const error: any = new Error(message);
-    error.statusCode = statusCode;
-    throw error;
-}
 
 export interface TimedOtpResult {
     otp: string;
@@ -129,15 +124,15 @@ export class OtpService {
         submittedOtp: string
     ): boolean {
         if (!submittedOtp || !submittedOtp.trim()) {
-            httpError(400, "OTP code is required");
+            throw new BadRequestError("OTP code is required");
         }
 
         if (!storedOtp || storedOtp.trim() !== submittedOtp.trim()) {
-            httpError(400, "Invalid OTP code");
+            throw new BadRequestError("Invalid OTP code");
         }
 
         if (expiresAt && new Date() > new Date(expiresAt)) {
-            httpError(400, "OTP has expired. Please request a new one.");
+            throw new BadRequestError("OTP has expired. Please request a new one.");
         }
 
         return true;
@@ -155,7 +150,7 @@ export class OtpService {
      */
     public async sendEmailOTP(email: string, options: SendEmailOtpOptions = {}): Promise<string> {
         if (!email || !email.trim()) {
-            httpError(400, "Email is required to send OTP");
+            throw new BadRequestError("Email is required to send OTP");
         }
 
         const cleanEmail = email.trim().toLowerCase();
@@ -172,7 +167,7 @@ export class OtpService {
         const title = options.title || "Email Verification";
         const emailResult = await this.emailNotifier.sendOTPEmail(cleanEmail, otp, subject, title);
         if (!emailResult?.success) {
-            httpError(500, "Failed to send OTP email");
+            throw new InternalServerError("Failed to send OTP email");
         }
 
         return otp;
@@ -183,7 +178,7 @@ export class OtpService {
      */
     public async verifyEmailOTP(email: string, otp: string): Promise<boolean> {
         if (!email || !otp) {
-            httpError(400, "Email and OTP code are required");
+            throw new BadRequestError("Email and OTP code are required");
         }
 
         const cleanEmail = email.trim().toLowerCase();
@@ -191,7 +186,7 @@ export class OtpService {
 
         const otpRecord = await this.otpModel.findOne({ email: cleanEmail, otp: cleanOtp });
         if (!otpRecord) {
-            httpError(400, "Invalid or expired OTP");
+            throw new BadRequestError("Invalid or expired OTP");
         }
 
         await this.otpModel.deleteOne({ email: cleanEmail, otp: cleanOtp });
@@ -203,12 +198,12 @@ export class OtpService {
      */
     public async sendPhoneOTP(phone: string, options: SendSmsOtpOptions = {}): Promise<{ phone: string; otp: string }> {
         if (!phone) {
-            httpError(400, "Phone number is required");
+            throw new BadRequestError("Phone number is required");
         }
 
         const normalizedPhone = this.normalizePhoneNumber(phone);
         if (!normalizedPhone.startsWith("+")) {
-            httpError(400, "Please include your country code (e.g. +91)");
+            throw new BadRequestError("Please include your country code (e.g. +91)");
         }
 
         const length = options.length || 6;
@@ -231,7 +226,7 @@ export class OtpService {
         } catch (smsError: any) {
             const errorMsg = smsError.response?.body?.message || smsError.message || "Unknown Brevo SMS error";
             console.error("Brevo SMS sending error:", errorMsg);
-            httpError(500, `Failed to send OTP SMS. Details: ${errorMsg}`);
+            throw new InternalServerError(`Failed to send OTP SMS. Details: ${errorMsg}`);
         }
 
         return { phone: normalizedPhone, otp };
@@ -242,18 +237,18 @@ export class OtpService {
      */
     public async verifyPhoneOTP(phone: string, otp: string): Promise<boolean> {
         if (!phone || !otp) {
-            httpError(400, "Phone number and OTP code are required");
+            throw new BadRequestError("Phone number and OTP code are required");
         }
 
         const normalizedPhone = this.normalizePhoneNumber(phone);
         if (!normalizedPhone.startsWith("+")) {
-            httpError(400, "Invalid phone number format");
+            throw new BadRequestError("Invalid phone number format");
         }
 
         const cleanOtp = otp.trim();
         const otpRecord = await this.otpModel.findOne({ phone: normalizedPhone, otp: cleanOtp });
         if (!otpRecord) {
-            httpError(400, "Invalid or expired OTP");
+            throw new BadRequestError("Invalid or expired OTP");
         }
 
         await this.otpModel.deleteOne({ _id: otpRecord._id });
@@ -266,7 +261,7 @@ export class OtpService {
     public async sendBookingJourneyOTP(options: SendBookingJourneyOtpOptions): Promise<TimedOtpResult> {
         const { email, experienceTitle, type, expiresInMinutes = 15, length = 6 } = options;
         if (!email || !email.trim()) {
-            httpError(400, "Guest email is required to send journey OTP");
+            throw new BadRequestError("Guest email is required to send journey OTP");
         }
 
         const expName = experienceTitle || "Experience";

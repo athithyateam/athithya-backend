@@ -5,6 +5,7 @@
  */
 
 const { Experience, User } = require("../db/mongoose");
+import { BadRequestError } from "../errors";
 import { geocodingService as defaultGeocodingService, GeocodingService } from "./geocodingService";
 
 export const EXPERIENCE_SEARCH_SELECT =
@@ -594,9 +595,7 @@ export class SearchService {
      */
     public async getSearchSuggestions(query: string): Promise<SearchSuggestionsResult> {
         if (!query || typeof query !== "string" || !query.trim()) {
-            const err: any = new Error("Query parameter 'q' is required");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Query parameter 'q' is required");
         }
 
         const escaped = escapeRegex(query.trim());
@@ -642,9 +641,7 @@ export class SearchService {
         } = options;
 
         if (!location || typeof location !== "string" || !location.trim()) {
-            const err: any = new Error("Location parameter is required");
-            err.statusCode = 400;
-            throw err;
+            throw new BadRequestError("Location parameter is required");
         }
 
         const locCond = buildExperienceLocationCondition(location);

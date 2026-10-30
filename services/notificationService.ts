@@ -1,5 +1,6 @@
 import { Notification, User } from "../db/mongoose";
 import { sendHtmlEmail } from "./emailService";
+import { NotFoundError } from "../errors";
 
 export interface SendNotificationOptions {
     recipient?: any;
@@ -356,9 +357,7 @@ export class NotificationService {
             { new: true }
         );
         if (!notification) {
-            const err: any = new Error("Notification not found");
-            err.statusCode = 404;
-            throw err;
+            throw new NotFoundError("Notification not found");
         }
         return notification;
     }
@@ -383,9 +382,7 @@ export class NotificationService {
             recipient: userId
         });
         if (!notification) {
-            const err: any = new Error("Notification not found");
-            err.statusCode = 404;
-            throw err;
+            throw new NotFoundError("Notification not found");
         }
         return true;
     }

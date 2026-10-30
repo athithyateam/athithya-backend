@@ -7,6 +7,7 @@ const defaultNotifyAdmins = (reqOrApp: any, payload?: any) => notificationServic
 const { userService: defaultUserService } = require("../userService");
 import { reviewService as defaultReviewService, ReviewService } from "../reviewService";
 import { bookingService as defaultBookingService } from "../bookingService";
+import { BadRequestError, ForbiddenError, NotFoundError } from "../../errors";
 import {
     parseExperiencePayload, calculatePricingAndFees, isValidS3MediaUrl, parseIfJson,
     buildCategoryFilter, attachDistanceToTreks, recordHostAuditLog, LISTING_CARD_PROJECTION,
@@ -85,7 +86,7 @@ export class ExperienceActionService {
         const photos = rawPhotos !== undefined ? (parseIfJson(rawPhotos) || []) : [...initialPhotos];
         const videos = rawVideos !== undefined ? (parseIfJson(rawVideos) || []) : [...initialVideos];
         if (photos.some((p: any) => !isValidS3MediaUrl(p)) || videos.some((v: any) => !isValidS3MediaUrl(v))) {
-            throw Object.assign(new Error("Invalid media URL. All photos and videos must be hosted on Athithya's S3 storage."), { statusCode: 400 });
+            throw new BadRequestError("Invalid media URL. All photos and videos must be hosted on Athithya's S3 storage.");
         }
         return { photos, videos };
     }
@@ -115,18 +116,18 @@ export class ExperienceActionService {
 
     public async createExperience(userId: string, userRole: string, experiencePayload: any, _files: any = null, reqOrApp: any = null): Promise<any> {
         if (userRole !== "host" && userRole !== "admin") {
-            throw Object.assign(new Error("Regular users cannot create experiences. Only verified hosts can create experiences."), { statusCode: 403 });
+            throw new ForbiddenError("Regular users cannot create experiences. Only verified hosts can create experiences.");
         }
         const hostUser = await this.userModel.findById(userId);
-        if (!hostUser) throw Object.assign(new Error("User not found"), { statusCode: 404 });
+        if (!hostUser) throw new NotFoundError("User not found");
         if (userRole === "host") {
             const hostDetails = await this.hostDetailsModel.findOne({ user: userId });
             if (!hostDetails || hostDetails.status !== "approved") {
-                throw Object.assign(new Error("You cannot add experiences until your host account is verified and approved by an admin."), { statusCode: 403 });
+                throw new ForbiddenError("You cannot add experiences until your host account is verified and approved by an admin.");
             }
         }
         if (!experiencePayload.title || !experiencePayload.description) {
-            throw Object.assign(new Error("Title and description are required"), { statusCode: 400 });
+            throw new BadRequestError("Title and description are required");
         }
 
         const { photos, videos } = this.processMediaInputs(experiencePayload.photos, experiencePayload.videos);
@@ -168,9 +169,9 @@ export class ExperienceActionService {
 
     public async updateExperience(experienceId: string, userId: string, userRole: string, updatePayload: any, _files: any = null, reqOrApp: any = null): Promise<any> {
         const experience = await this.experienceModel.findById(experienceId);
-        if (!experience) throw Object.assign(new Error("Experience not found"), { statusCode: 404 });
+        if (!experience) throw new NotFoundError("Experience not found");
         if (experience.user.toString() !== userId && userRole !== "admin") {
-            throw Object.assign(new Error("You can only edit your own experiences"), { statusCode: 403 });
+            throw new ForbiddenError("You can only edit your own experiences");
         }
 
         const isLive = experience.status === "active";
@@ -244,10 +245,10 @@ export class ExperienceActionService {
         _reqOrApp: any = null
     ): Promise<any> {
         if (!["active", "inactive", "archived", "pending"].includes(status)) {
-            throw Object.assign(new Error("Invalid status"), { statusCode: 400 });
+            throw new BadRequestError("Invalid status");
         }
         const experience = await this.experienceModel.findById(experienceId).populate("user");
-        if (!experience) throw Object.assign(new Error("Experience not found"), { statusCode: 404 });
+        if (!experience) throw new NotFoundError("Experience not found");
 
         const hostUser = experience.user;
         const hostId = hostUser?._id || experience.user;
@@ -516,9 +517,9 @@ export class ExperienceActionService {
 
     public async toggleHideExperience(experienceId: string, userId: string, userRole: string, action: string, reason: string = "", reqOrApp: any = null): Promise<any> {
         const experience = await this.experienceModel.findById(experienceId);
-        if (!experience) throw Object.assign(new Error("Experience not found"), { statusCode: 404 });
+        if (!experience) throw new NotFoundError("Experience not found");
         if (experience.user.toString() !== userId && userRole !== "admin") {
-            throw Object.assign(new Error("You are not authorized to modify this experience"), { statusCode: 403 });
+            throw new ForbiddenError("You are not authorized to modify this experience");
         }
 
         const hostUser = await this.userModel.findById(experience.user);
@@ -560,7 +561,7 @@ export class ExperienceActionService {
         }
 
         if (action === "request_unhide") {
-            if (!experience.isHidden) throw Object.assign(new Error("Experience is not currently hidden"), { statusCode: 400 });
+            if (!experience.isHidden) throw new BadRequestError("Experience is not currently hidden");
             experience.unhideRequested = true;
             experience.hideRequested = false;
             experience.unhideRequestedAt = new Date();
@@ -576,7 +577,7 @@ export class ExperienceActionService {
         }
 
         if (action === "unhide") {
-            if (userRole !== "admin") throw Object.assign(new Error("Only admins can approve unhiding an experience"), { statusCode: 403 });
+            if (userRole !== "admin") throw new ForbiddenError("Only admins can approve unhiding an experience");
             experience.isHidden = false;
             experience.hiddenAt = undefined;
             experience.hideReason = "";
@@ -593,14 +594,14 @@ export class ExperienceActionService {
             return { message: "Experience unhidden successfully", isHidden: false };
         }
 
-        throw Object.assign(new Error("Invalid action. Must be 'hide', 'request_hide', 'unhide', or 'request_unhide'"), { statusCode: 400 });
+        throw new BadRequestError("Invalid action. Must be 'hide', 'request_hide', 'unhide', or 'request_unhide'");
     }
 
     public async deleteExperience(experienceId: string, userId: string, userRole: string, reqOrApp: any = null): Promise<{ success: boolean; message: string; pendingReview?: boolean }> {
         const experience = await this.experienceModel.findById(experienceId);
-        if (!experience) throw Object.assign(new Error("Experience not found"), { statusCode: 404 });
+        if (!experience) throw new NotFoundError("Experience not found");
         if (experience.user.toString() !== userId && userRole !== "admin") {
-            throw Object.assign(new Error("You can only delete your own experiences"), { statusCode: 403 });
+            throw new ForbiddenError("You can only delete your own experiences");
         }
 
         const hostUser = await this.userModel.findById(experience.user);
@@ -653,9 +654,9 @@ export class ExperienceActionService {
     }
 
     public async saveExperience(experienceId: string, userId: string, userRole: string): Promise<{ success: boolean; message: string }> {
-        if (userRole === "host") throw Object.assign(new Error("Hosts cannot bookmark another host's experience. Only guests can."), { statusCode: 400 });
+        if (userRole === "host") throw new BadRequestError("Hosts cannot bookmark another host's experience. Only guests can.");
         const experience = await this.experienceModel.findById(experienceId);
-        if (!experience) throw Object.assign(new Error("Experience not found"), { statusCode: 404 });
+        if (!experience) throw new NotFoundError("Experience not found");
         const added = await this.userService.addSavedExperience(userId, experienceId);
         if (added) await this.experienceModel.findByIdAndUpdate(experienceId, { $inc: { savesCount: 1 } });
         return { success: true, message: "Experience saved successfully" };
@@ -753,7 +754,7 @@ export class ExperienceActionService {
     public async getExperienceDetail(experienceId: string): Promise<ExperienceDetailResult> {
         const experience = await this.experienceModel.findById(experienceId)
             .populate("user", "firstname lastname avatar role description isVerified");
-        if (!experience) throw Object.assign(new Error("Experience not found"), { statusCode: 404 });
+        if (!experience) throw new NotFoundError("Experience not found");
 
         this.experienceModel.findByIdAndUpdate(experienceId, { $inc: { clicks: 1 } }).catch((err: any) => console.error("Clicks increment error:", err));
 
@@ -819,12 +820,12 @@ export class ExperienceActionService {
 
     public async getNearbyTreks(options: GetNearbyTreksOptions = {}): Promise<NearbyTreksResult> {
         const { latitude, longitude, limit = 10, page = 1, difficulty, minPrice, maxPrice, categories } = options;
-        if (!latitude || !longitude) throw Object.assign(new Error("latitude and longitude query parameters are required"), { statusCode: 400 });
+        if (!latitude || !longitude) throw new BadRequestError("latitude and longitude query parameters are required");
 
         const lat = parseFloat(String(latitude));
         const lng = parseFloat(String(longitude));
         if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-            throw Object.assign(new Error("Invalid coordinates"), { statusCode: 400 });
+            throw new BadRequestError("Invalid coordinates");
         }
 
         const pageNum = Math.max(1, parseInt(String(page)));
