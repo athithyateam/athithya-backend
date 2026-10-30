@@ -76,7 +76,7 @@ Manages in-app notifications, unread counters, booking alerts, and follow notifi
     "title": "Important Update",
     "message": "Trip departure time adjusted by 30 mins",
     "type": "info", // "info" | "booking_request" | "booking_accepted" | "invite_sent" | "follow"
-    "link": "/post/64f1..."
+    "link": "/experiences/64f1..."
   }
   ```
 * **Success Response (201)**: Returns created notification.

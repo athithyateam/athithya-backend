@@ -14,7 +14,7 @@ Full-text search across experiences, plans, treks, services, and users, along wi
 * **Auth**: Public
 * **Query Parameters**:
   * `q`: `string` (Query term - searches title, description, address, categories, user bio/names)
-  * `type`: `"all"` | `"itinerary"` | `"experience"` | `"trek"` | `"service"` | `"people"` | `"host"` | `"guest"`
+  * `type`: `"all"` | `"experience"` | `"trek"` | `"service"` | `"people"` | `"host"` | `"guest"`
   * `location` or `city`: `string`
   * `difficulty`: `string`
   * `category`: `string`
@@ -30,7 +30,7 @@ Full-text search across experiences, plans, treks, services, and users, along wi
     "data": {
       "results": [ ... ],
       "people": [ ... ],
-      "posts": [ ... ],
+      "experiences": [ ... ],
       "pagination": {
         "currentPage": 1,
         "totalPages": 4,
@@ -56,7 +56,7 @@ Full-text search across experiences, plans, treks, services, and users, along wi
   ```json
   {
     "searchText": "hiking",
-    "postTypes": ["plan", "experience", "trek"],
+    "experienceTypes": ["experience", "trek"],
     "locations": ["Manali", "Kasol"],
     "difficulties": ["Moderate", "Challenging"],
     "categories": ["Trekking", "Adventure"],
@@ -102,10 +102,10 @@ Full-text search across experiences, plans, treks, services, and users, along wi
 * **Auth**: Public
 * **Query Parameters**:
   * `location`: `string` (Required)
-  * `type`: `"all"` | `"itinerary"` | `"experience"`
+  * `type`: `"all"` | `"experience"` | `"trek"` | `"service"`
   * `sortBy`: `"createdAt"` | `"rating"` | `"price"`
   * `page`, `limit`: `number`
-* **Success Response (200)**: Returns results organized into combined lists, separated into `itineraries` and `experiences`.
+* **Success Response (200)**: Returns paginated list of matching experiences for the specified location.
 
 ---
 

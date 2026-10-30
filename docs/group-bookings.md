@@ -15,7 +15,7 @@ Provides collaborative trip planning, tiered discount reservations, bulk friend 
 * **Request Body** (`application/json`):
   ```json
   {
-    "postId": "64f1a2b...",
+    "experienceId": "64f1a2b...",
     "invitedUserIds": ["60d0fe...", "60d0ff..."],
     "bookingDate": "2026-12-01",
     "numberOfPeople": 1
@@ -29,7 +29,7 @@ Provides collaborative trip planning, tiered discount reservations, bulk friend 
     "data": {
       "_id": "652a...",
       "initiator": "60d0...",
-      "post": "64f1a2b...",
+      "experience": "64f1a2b...",
       "status": "planning",
       "invitedPeople": [
         {
@@ -51,7 +51,7 @@ Provides collaborative trip planning, tiered discount reservations, bulk friend 
 * **Request Body** (`application/json`):
   ```json
   {
-    "postId": "64f1a2b...",
+    "experienceId": "64f1a2b...",
     "friendIds": ["60d0fe...", "60d0ff..."],
     "groupBookingId": "652a...", // Optional: append to existing session
     "bookingDate": "2026-12-01",
@@ -65,8 +65,9 @@ Provides collaborative trip planning, tiered discount reservations, bulk friend 
 ### 3. Remove Invited Friend
 * **Method**: `DELETE` or `POST`
 * **Path**: 
-  * `DELETE /api/group-bookings/post/:postId/invite/:friendId`
-  * `POST /api/group-bookings/post/:postId/invite/:friendId/remove` (Fallback)
+  * `DELETE /api/group-bookings/experience/:experienceId/invite/:friendId`
+  * `POST /api/group-bookings/experience/:experienceId/invite/:friendId/remove` (Fallback)
+  * `DELETE /api/group-bookings/post/:postId/invite/:friendId` (Legacy alias)
 * **Auth**: Required (`checkAuth`)
 
 ---
@@ -75,7 +76,7 @@ Provides collaborative trip planning, tiered discount reservations, bulk friend 
 * **Method**: `GET`
 * **Path**: `/api/group-bookings/me`
 * **Auth**: Required (`checkAuth`)
-* **Success Response (200)**: Returns group booking sessions initiated by the caller.
+* **Success Response (200)**: Returns group booking sessions initiated by the caller with populated experience details.
 
 ---
 
@@ -109,7 +110,9 @@ Provides collaborative trip planning, tiered discount reservations, bulk friend 
 
 ### 7. Get Group Booking Session Status
 * **Method**: `GET`
-* **Path**: `/api/group-bookings/post/:postId/status?groupBookingId=652a...`
+* **Path**: 
+  * `/api/group-bookings/experience/:experienceId/status?groupBookingId=652a...`
+  * `/api/group-bookings/post/:postId/status?groupBookingId=652a...` (Legacy alias)
 * **Auth**: Optional (`checkOptionalAuth`)
 * **Success Response (200)**: Returns active planning or confirmed session details, expired status flags, and member payment states.
 

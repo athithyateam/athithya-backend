@@ -15,12 +15,12 @@ Handles guest reviews for hosts and experiences, verified completion requirement
 * **Eligibility Rules**:
   * Hosts cannot review other hosts.
   * Users cannot review themselves.
-  * If `postId` is provided, guest must have a `completed` booking for that specific experience.
+  * If `experienceId` is provided, guest must have a `completed` booking for that specific experience.
 * **Request Body** (`application/json`):
   ```json
   {
     "hostId": "60d0aa...",
-    "postId": "64f1a2b...", // Optional: specific post review
+    "experienceId": "64f1a2b...", // Optional: specific experience review
     "rating": 5, // Number between 1 and 5
     "comment": "Had an incredible time! The host was super knowledgeable."
   }
@@ -34,7 +34,7 @@ Handles guest reviews for hosts and experiences, verified completion requirement
       "_id": "650c...",
       "reviewer": { ... },
       "host": { ... },
-      "post": { ... },
+      "experience": { ... },
       "rating": 5,
       "comment": "..."
     }
@@ -54,7 +54,7 @@ Handles guest reviews for hosts and experiences, verified completion requirement
     "comment": "Updated thoughts..."
   }
   ```
-* **Success Response (200)**: Returns updated review and automatically re-calculates post average rating.
+* **Success Response (200)**: Returns updated review and automatically re-calculates experience and host average ratings.
 
 ---
 
@@ -62,7 +62,7 @@ Handles guest reviews for hosts and experiences, verified completion requirement
 * **Method**: `DELETE`
 * **Path**: `/api/reviews/:id`
 * **Auth**: Required (`checkAuth` - author only)
-* **Success Response (200)**: Removes review and recalculates post rating.
+* **Success Response (200)**: Removes review and recalculates experience and host ratings.
 
 ---
 
@@ -70,7 +70,7 @@ Handles guest reviews for hosts and experiences, verified completion requirement
 
 ### 2.1 Check Review Eligibility
 * **Method**: `GET`
-* **Path**: `/api/reviews/check-eligibility?postId=64f1a2b...`
+* **Path**: `/api/reviews/check-eligibility?experienceId=64f1a2b...`
 * **Auth**: Required (`checkAuth`)
 * **Success Response (200)**:
   ```json
@@ -81,7 +81,7 @@ Handles guest reviews for hosts and experiences, verified completion requirement
   ```
 * **Failure Responses (200 with `eligible: false`)**:
   * Reason: `"host_restricted"` (User is a host)
-  * Reason: `"not_booked"` (Guest never booked this post)
+  * Reason: `"not_booked"` (Guest never booked this experience)
   * Reason: `"not_completed"` (Booking is pending or ongoing, not completed)
 
 ---

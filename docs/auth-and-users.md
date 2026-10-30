@@ -245,7 +245,7 @@ Base prefixes:
 
 ---
 
-### 2.4 Get My Saved Wishlist Posts
+### 2.4 Get My Saved Experiences (Wishlist)
 * **Method**: `GET`
 * **Path**: `/api/users/me/saved`
 * **Auth**: Required (`checkAuth`)
@@ -253,7 +253,7 @@ Base prefixes:
   ```json
   {
     "success": true,
-    "posts": [ ... ]
+    "experiences": [ ... ]
   }
   ```
 
@@ -317,7 +317,7 @@ Base prefixes:
 * **Method**: `GET`
 * **Path**: `/api/users/profile/:userId/complete`
 * **Auth**: Optional (`checkOptionalAuth`)
-* **Success Response (200)**: Returns complete profile including posts, reviews count, and social links.
+* **Success Response (200)**: Returns complete profile including experiences, reviews count, and social links.
 
 ---
 
@@ -337,28 +337,18 @@ Base prefixes:
 
 ---
 
-## 4. Community Posts & Feeds
-
-* **Get User Community Posts**: `GET /api/users/profile/:userId/community-posts` (Optional auth)
-* **Create Community Post**: `POST /api/users/community-posts` (Auth required, Body: `{ "description": "...", "media": [...] }`)
-* **Toggle Like**: `POST /api/users/community-posts/:id/like` (Auth required)
-* **Get Likers**: `GET /api/users/community-posts/:id/likers` (Optional auth)
-* **Delete Community Post**: `DELETE /api/users/community-posts/:id` (Auth required - owner only)
-
----
-
-## 5. Host Grid Media & Gallery
+## 4. Host Grid Media & Gallery
 
 * **Get Host Grid Media**: `GET /api/users/profile/:userId/grid-media` (Optional auth)
 * **Update Tab Preference**: `PATCH /api/users/grid-tab-preference` (Auth required, Body: `{ "tab": "personal" | "experiences" }`)
 * **Add Personal Media**: `POST /api/users/personal-media` (Auth required, Body: `{ "url": "...", "publicId": "...", "caption": "..." }`)
 * **Delete Personal Media**: `DELETE /api/users/personal-media/:id` (Auth required)
 * **Toggle Pin Personal Media**: `PATCH /api/users/personal-media/:id/pin` (Auth required)
-* **Toggle Pin Experience Media**: `PATCH /api/users/experience-media/pin` (Auth required, Body: `{ "postId": "...", "isPinned": true }`)
+* **Toggle Pin Experience Media**: `PATCH /api/users/experience-media/pin` (Auth required, Body: `{ "mediaKey": "...", "experienceId": "..." }`)
 
 ---
 
-## 6. Friendships & Social
+## 5. Friendships & Social
 
 * **Send Friend Request**: `POST /api/users/:id/friend-request` (Auth required)
 * **Accept Friend Request**: `POST /api/users/:id/friend-accept` (Auth required)
@@ -368,7 +358,7 @@ Base prefixes:
 
 ---
 
-## 7. Get User by ID (Catch-all)
+## 6. Get User by ID (Catch-all)
 * **Method**: `GET`
 * **Path**: `/api/users/:id`
 * **Auth**: Required (`checkAuth`)

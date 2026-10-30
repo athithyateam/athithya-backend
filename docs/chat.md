@@ -2,7 +2,7 @@
 
 Base prefix: `/api/chat`
 
-Handles 1-on-1 direct messaging, group chat plans, eligibility enforcement between hosts and guests, S3 attachment handling, real-time Socket.io broadcasting, and shared collaborative itineraries.
+Handles 1-on-1 direct messaging, group chats, eligibility enforcement between hosts and guests, S3 attachment handling, and real-time Socket.io broadcasting.
 
 ---
 
@@ -187,31 +187,10 @@ Hosts and guests are subject to strict messaging eligibility rules:
 
 ---
 
-## 4. Collaborative Group Itinerary
-
-### 4.1 Add or Remove Itinerary Pin
-* **Method**: `POST`
-* **Path**: `/api/chat/conversations/:conversationId/itinerary`
-* **Auth**: Required (`checkAuth`)
-* **Request Body** (`application/json`):
-  ```json
-  {
-    "action": "add", // "add" | "remove"
-    "lat": 9.4981,
-    "lng": 76.3388,
-    "cityName": "Alleppey",
-    "postId": "64f1a2b..."
-  }
-  ```
-* **Success Response (200)**: Updates pins in conversation itinerary and emits `itinerary_updated` via Socket.io.
-
----
-
-## 5. Real-Time Socket.io Events
+## 4. Real-Time Socket.io Events
 
 The server exposes Socket.io on the base URL:
 * **Client Emit `join`**: Sends `userId` to join personal notification/chat room and mark presence.
 * **Server Broadcast `online_users_list`**: Emitted when user presence changes.
 * **Server Emit `new_message`**: Emitted to recipient room with new message payload.
 * **Server Emit `message_sent`**: Emitted to sender room for message confirmation.
-* **Server Emit `itinerary_updated`**: Broadcast to all participants when itinerary pins change.

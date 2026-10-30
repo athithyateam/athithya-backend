@@ -103,14 +103,14 @@ Requests must supply a valid JWT with `role: "admin"`.
 ### 3.4 Update Experience
 * **Method**: `PATCH`
 * **Path**: `/api/admin/experiences/:id`
-* **Request Body**: Direct administrative edits to post title, price, or description.
+* **Request Body**: Direct administrative edits to experience title, price, or description.
 
 ---
 
 ### 3.5 Delete Experience
 * **Method**: `DELETE`
 * **Path**: `/api/admin/experiences/:id`
-* **Success Response (200)**: Permanently removes post document and media.
+* **Success Response (200)**: Permanently removes experience document and media.
 
 ---
 

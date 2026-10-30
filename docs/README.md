@@ -53,14 +53,13 @@ Most endpoints conform to standard JSON responses:
 | Module | Route Prefix | Spec Document |
 | :--- | :--- | :--- |
 | **Authentication & Users** | `/api/auth`, `/api/users` | [auth-and-users.md](./auth-and-users.md) |
-| **Posts (Experiences, Services, Treks)** | `/api/posts` | [posts.md](./posts.md) |
+| **Experiences** | `/api/experiences` | [experiences.md](./experiences.md) |
 | **Bookings & Payments** | `/api/bookings` | [bookings.md](./bookings.md) |
 | **Reviews & Ratings** | `/api/reviews` | [reviews.md](./reviews.md) |
-| **Itineraries (Plans)** | `/api/itineraries` | [itineraries.md](./itineraries.md) |
 | **Search & Geocoding** | `/api/search` | [search.md](./search.md) |
 | **Notifications** | `/api/notifications` | [notifications.md](./notifications.md) |
 | **Group Bookings** | `/api/group-bookings` | [group-bookings.md](./group-bookings.md) |
 | **Wishlist Schedules** | `/api/wishlist-schedules` | [wishlist-schedules.md](./wishlist-schedules.md) |
-| **Real-time Chat & Group Plans** | `/api/chat` | [chat.md](./chat.md) |
+| **Real-time Chat & Messaging** | `/api/chat` | [chat.md](./chat.md) |
 | **Admin Operations** | `/api/admin` | [admin.md](./admin.md) |
 | **Google Analytics** | `/api/analytics` | [analytics.md](./analytics.md) |

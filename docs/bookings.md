@@ -16,7 +16,7 @@ Manages experience reservations, Razorpay order creation and payment verificatio
 * **Request Body** (`application/json`):
   ```json
   {
-    "postId": "64f1a2b...",
+    "experienceId": "64f1a2b...", // ID of the booked experience
     "numberOfPeople": 2, // 1 to 3 travelers allowed
     "startDate": "2026-11-01",
     "endDate": "2026-11-01",
@@ -32,7 +32,7 @@ Manages experience reservations, Razorpay order creation and payment verificatio
     "success": true,
     "booking": {
       "_id": "64f9d...",
-      "post": "64f1a2b...",
+      "experience": "64f1a2b...",
       "guest": "60d0fe...",
       "host": "60d0aa...",
       "amount": 2400,
@@ -100,7 +100,7 @@ Manages experience reservations, Razorpay order creation and payment verificatio
 * **Method**: `GET`
 * **Path**: `/api/bookings/:bookingId`
 * **Auth**: Required (`checkAuth`)
-* **Success Response (200)**: Complete booking details with populated post and user info.
+* **Success Response (200)**: Complete booking details with populated experience and user info.
 
 ---
 

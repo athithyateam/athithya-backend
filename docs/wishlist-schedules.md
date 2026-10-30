@@ -16,7 +16,7 @@ Allows guests to save and schedule specific dates/times for experiences they pla
 * **Request Body** (`application/json`):
   ```json
   {
-    "postId": "64f1a2b...",
+    "experienceId": "64f1a2b...",
     "scheduledDate": "2026-11-15", // Format: YYYY-MM-DD
     "scheduledTime": "14:30" // Format: HH:mm (24-hour)
   }
@@ -29,7 +29,7 @@ Allows guests to save and schedule specific dates/times for experiences they pla
     "schedule": {
       "_id": "653b...",
       "user": "60d0fe...",
-      "post": {
+      "experience": {
         "_id": "64f1a2b...",
         "title": "Sunset Kayaking",
         "photos": [ ... ],
@@ -56,7 +56,7 @@ Allows guests to save and schedule specific dates/times for experiences they pla
     "schedules": [
       {
         "_id": "653b...",
-        "post": { ... },
+        "experience": { ... },
         "scheduledDateTime": "2026-11-15T09:00:00.000Z",
         "status": "scheduled"
       }
@@ -66,9 +66,9 @@ Allows guests to save and schedule specific dates/times for experiences they pla
 
 ---
 
-### 3. Check Wishlist Schedule Status for Post
+### 3. Check Wishlist Schedule Status for Experience
 * **Method**: `GET`
-* **Path**: `/api/wishlist-schedules/check/:postId`
+* **Path**: `/api/wishlist-schedules/check/:experienceId`
 * **Auth**: Required (`checkAuth`)
 * **Success Response (200)**:
   ```json
