@@ -31,11 +31,12 @@ const searchAll = async (req, res) => {
 
 /**
  * Multi-criteria advanced search
- * POST /api/search/advanced
+ * POST /api/search/advanced or GET /api/search/advanced
  */
 const advancedSearch = async (req, res) => {
     try {
-        const result = await searchService.advancedSearch(req.body);
+        const payload = (req.body && Object.keys(req.body).length > 0) ? req.body : req.query;
+        const result = await searchService.advancedSearch(payload);
         return res.status(200).json({
             success: true,
             message: "Advanced search completed successfully",
@@ -58,7 +59,7 @@ const advancedSearch = async (req, res) => {
 const getSearchSuggestions = async (req, res) => {
     try {
         const { q } = req.query;
-        if (!q || !q.trim()) {
+        if (!q || typeof q !== "string" || !q.trim()) {
             return res.status(400).json({
                 success: false,
                 message: "Query parameter 'q' is required"
@@ -86,7 +87,7 @@ const getSearchSuggestions = async (req, res) => {
 const searchByLocation = async (req, res) => {
     try {
         const { location } = req.query;
-        if (!location || !location.trim()) {
+        if (!location || typeof location !== "string" || !location.trim()) {
             return res.status(400).json({
                 success: false,
                 message: "Location parameter is required"
@@ -115,19 +116,30 @@ const searchByLocation = async (req, res) => {
 const reverseGeocode = async (req, res) => {
     try {
         const { lat, lon } = req.query;
-        if (!lat || !lon) {
+        if (lat === undefined || lon === undefined || lat === "" || lon === "") {
             return res.status(400).json({
                 success: false,
                 message: "lat and lon are required"
             });
         }
-        const result = await geocodingService.reverseGeocode(lat, lon);
+
+        const latNum = parseFloat(lat);
+        const lonNum = parseFloat(lon);
+        if (isNaN(latNum) || isNaN(lonNum) || latNum < -90 || latNum > 90 || lonNum < -180 || lonNum > 180) {
+            return res.status(400).json({
+                success: false,
+                message: "lat must be between -90 and 90, and lon between -180 and 180"
+            });
+        }
+
+        const result = await geocodingService.reverseGeocode(latNum, lonNum);
         return res.status(200).json(result);
     } catch (error) {
         console.error("Reverse geocode error:", error);
         return res.status(error.statusCode || 500).json({
             success: false,
-            message: error.message || "Geocoding failed"
+            message: error.message || "Geocoding failed",
+            error: error.message
         });
     }
 };
@@ -139,7 +151,7 @@ const reverseGeocode = async (req, res) => {
 const geocodeSearch = async (req, res) => {
     try {
         const { q, ...extra } = req.query;
-        if (!q || !q.trim()) {
+        if (!q || typeof q !== "string" || !q.trim()) {
             return res.status(400).json({
                 success: false,
                 message: "q is required"
@@ -151,7 +163,8 @@ const geocodeSearch = async (req, res) => {
         console.error("Geocode search error:", error);
         return res.status(error.statusCode || 500).json({
             success: false,
-            message: error.message || "Search failed"
+            message: error.message || "Search failed",
+            error: error.message
         });
     }
 };

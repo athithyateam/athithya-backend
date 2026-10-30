@@ -184,7 +184,6 @@ app.use((err, req, res, next) => {
 });
 
 // Online status tracking
-const { Message, Conversation } = require("./db/mongoose");
 const onlineUsers = new Set();
 
 io.on("connection", (socket) => {

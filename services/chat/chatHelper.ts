@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { User, Conversation } from "../../db/mongoose";
 import { sendHtmlEmail } from "../emailService";
 import { notificationService } from "../notificationService";
@@ -72,6 +73,15 @@ export interface ChatSessionSummary {
 const lastEmailedMap = new Map<string, number>();
 const EMAIL_DEBOUNCE_MS = 2 * 60 * 1000; // 2 minutes
 
+function pruneDebounceCache() {
+    if (lastEmailedMap.size > 500) {
+        const threshold = Date.now() - EMAIL_DEBOUNCE_MS;
+        for (const [key, timestamp] of lastEmailedMap.entries()) {
+            if (timestamp < threshold) lastEmailedMap.delete(key);
+        }
+    }
+}
+
 /**
  * Checks if 1-on-1 chat between two users is eligible based on Athithya's business rules:
  * 1. Admin or official accounts can chat freely.
@@ -94,9 +104,19 @@ export async function checkChatEligibility(
 
         if (!cleanIdA || !cleanIdB || cleanIdA === cleanIdB) return { canChat: true };
 
+        const isValidA = mongoose.Types.ObjectId.isValid(cleanIdA);
+        const isValidB = mongoose.Types.ObjectId.isValid(cleanIdB);
+        if (!isValidA || !isValidB) {
+            return { canChat: false, reason: "Invalid participant identifier" };
+        }
+
         const users = await userModel.find({ _id: { $in: [cleanIdA, cleanIdB] } }, "role firstname lastname");
         const userA = users.find((u: any) => String(u._id) === cleanIdA);
         const userB = users.find((u: any) => String(u._id) === cleanIdB);
+
+        if (!userA || !userB) {
+            return { canChat: false, reason: "One or more participants do not exist." };
+        }
 
         const isAdmin = users.some((u: any) => u.role === "admin" || (u.firstname === "Athithya" && u.lastname === "Official"));
         if (isAdmin) return { canChat: true };
@@ -126,6 +146,7 @@ export async function checkChatEligibility(
         // CASE 4: Host messaging Guest (can only respond to existing conversation)
         if (isHostA && !isHostB) {
             const existingConv = await conversationModel.findOne({
+                isGroup: { $ne: true },
                 participants: { $all: [cleanIdA, cleanIdB], $size: 2 }
             });
 
@@ -168,6 +189,7 @@ export async function notifyRecipientOfNewMessage(
         const lastSent = lastEmailedMap.get(debounceKey);
         const now = Date.now();
 
+        pruneDebounceCache();
         if (lastSent && (now - lastSent) < EMAIL_DEBOUNCE_MS) return;
         lastEmailedMap.set(debounceKey, now);
 

@@ -79,6 +79,7 @@ export const generatePresignedUploadUrl = (
 
 export const uploadToS3 = (file: any, folder: string = "") => storageService.upload(file, folder);
 export const deleteFromS3 = (key: string) => storageService.delete(key);
+export const getPresignedUploadUrl = generatePresignedUploadUrl;
 
 // CommonJS compatibility
 module.exports = storageService;
@@ -88,6 +89,7 @@ module.exports.storageService = storageService;
 module.exports.upload = upload;
 module.exports.deleteFile = deleteFile;
 module.exports.generatePresignedUploadUrl = generatePresignedUploadUrl;
+module.exports.getPresignedUploadUrl = generatePresignedUploadUrl;
 module.exports.uploadToS3 = uploadToS3;
 module.exports.deleteFromS3 = deleteFromS3;
 module.exports.default = StorageService;

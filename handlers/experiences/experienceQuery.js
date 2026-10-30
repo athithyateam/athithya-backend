@@ -102,7 +102,12 @@ const getNearbyTreks = async (req, res) => {
  */
 const getUserExperiences = async (req, res) => {
     try {
-        const experiences = await experienceService.getUserExperiences(req.params.userId);
+        const isSelfOrAdmin = req.user && (
+            req.user.userId === req.params.userId ||
+            req.user.id === req.params.userId ||
+            req.user.role === "admin"
+        );
+        const experiences = await experienceService.getUserExperiences(req.params.userId, !!isSelfOrAdmin);
 
         return res.status(200).json({
             success: true,

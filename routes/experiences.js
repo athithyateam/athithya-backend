@@ -1,6 +1,6 @@
 const express = require("express");
 const experienceHandler = require("../handlers/experienceHandler");
-const { checkAuth, checkAdmin, checkApprovedHost } = require("../middleware/checkRole");
+const { checkAuth, checkAdmin, checkApprovedHost, checkOptionalAuth } = require("../middleware/checkRole");
 
 const experienceRouter = express.Router();
 
@@ -26,7 +26,7 @@ experienceRouter.get("/presigned-url", checkAuth, experienceHandler.getPresigned
 experienceRouter.post("/", checkAuth, checkApprovedHost, experienceHandler.createExperience);
 
 // GET ALL EXPERIENCES
-experienceRouter.get("/", experienceHandler.getExperiences);
+experienceRouter.get("/", checkOptionalAuth, experienceHandler.getExperiences);
 
 // GET CATEGORY RECENT ACTIVITY & HIGHLIGHT STATUS
 experienceRouter.get("/categories/activity", experienceHandler.getCategoryActivity);
@@ -48,7 +48,7 @@ experienceRouter.delete("/:id/save", checkAuth, experienceHandler.unsaveExperien
 experienceRouter.get("/reviews/:experienceId", experienceHandler.getExperienceReviews);
 
 // USER'S EXPERIENCES
-experienceRouter.get("/user/:userId", experienceHandler.getUserExperiences);
+experienceRouter.get("/user/:userId", checkOptionalAuth, experienceHandler.getUserExperiences);
 experienceRouter.get("/my/experiences", checkAuth, setMyUser, experienceHandler.getUserExperiences);
 
 // UPDATE & DELETE & HIDE (JSON payload — files already on S3)
@@ -65,13 +65,13 @@ experienceRouter.get("/most-loved", (req, res, next) => { req.query.sort = 'book
 // TREK CONVENIENCE ENDPOINTS
 experienceRouter.post("/treks", checkAuth, checkApprovedHost, setCategoryFilter('Trek'), experienceHandler.createExperience);
 experienceRouter.get("/treks", setCategoryFilter('Trek'), experienceHandler.getExperiences);
-experienceRouter.get("/treks/:id", experienceHandler.getExperienceDetail);
+experienceRouter.get("/treks/:id", checkOptionalAuth, experienceHandler.getExperienceDetail);
 
 // ADMIN ROUTES
 experienceRouter.get("/admin/pending", checkAuth, checkAdmin, (req, res, next) => { req.query.status = 'pending'; next(); }, experienceHandler.getPendingExperiences);
 experienceRouter.patch("/admin/:id/status", checkAuth, checkAdmin, experienceHandler.updateExperienceStatus);
 
 // SINGLE EXPERIENCE BY ID
-experienceRouter.get("/:id", experienceHandler.getExperienceDetail);
+experienceRouter.get("/:id", checkOptionalAuth, experienceHandler.getExperienceDetail);
 
 module.exports = experienceRouter;

@@ -8,10 +8,10 @@ const { Experience, User } = require("../db/mongoose");
 import { geocodingService as defaultGeocodingService, GeocodingService } from "./geocodingService";
 
 export const EXPERIENCE_SEARCH_SELECT =
-    "title subtitle photos location price duration difficulty categories discounts isFeatured status rating bookingCount clicks user createdAt";
+    "title subtitle photos location price duration difficulty categories discounts isFeatured status rating bookingCount savesCount clicks user createdAt approvedAt";
 
 export const USER_SEARCH_SELECT =
-    "firstname lastname email avatar role location description bio";
+    "firstname lastname email avatar role location description interests";
 
 export interface PaginationDetails {
     currentPage: number;
@@ -42,12 +42,7 @@ export interface UniversalSearchResult {
     people: any[];
     experiences: any[];
     posts: any[];
-    pagination: {
-        currentPage: number;
-        totalPages: number;
-        totalResults: number;
-        resultsPerPage: number;
-    };
+    pagination: PaginationDetails;
     filters: {
         query: string | null;
         type: string;
@@ -57,14 +52,19 @@ export interface UniversalSearchResult {
 
 export interface AdvancedSearchOptions {
     searchText?: string;
-    experienceTypes?: string[];
-    postTypes?: string[];
-    locations?: string[];
-    difficulties?: string[];
-    categories?: string[];
-    priceRange?: { min?: number; max?: number };
-    durationRange?: { minDays?: number; maxDays?: number };
-    amenities?: string[];
+    experienceTypes?: string[] | string;
+    postTypes?: string[] | string;
+    locations?: string[] | string;
+    difficulties?: string[] | string;
+    categories?: string[] | string;
+    priceRange?: { min?: number | string; max?: number | string };
+    durationRange?: {
+        minDays?: number | string;
+        maxDays?: number | string;
+        minHours?: number | string;
+        maxHours?: number | string;
+    };
+    amenities?: string[] | string;
     rating?: number | string | null;
     sortBy?: string;
     sortOrder?: string;
@@ -78,6 +78,7 @@ export interface AdvancedSearchResult {
 }
 
 export interface SearchSuggestionItem {
+    id?: string;
     text: string;
     location: string;
     type: string;
@@ -90,6 +91,8 @@ export interface SearchSuggestionsResult {
 export interface LocationSearchOptions {
     location: string;
     type?: string;
+    category?: string;
+    difficulty?: string;
     sortBy?: string;
     sortOrder?: string;
     page?: number | string;
@@ -144,28 +147,49 @@ export function buildSortOptions(
     sortOrder: string = "desc"
 ): Record<string, 1 | -1> {
     const direction: 1 | -1 = sortOrder === "asc" ? 1 : -1;
-    if (sortBy === "rating") return { "rating.average": direction };
-    if (sortBy === "price") return { "price.perPerson": direction };
-    if (sortBy === "clicks") return { clicks: direction };
-    if (sortBy === "bookings" || sortBy === "bookingCount") return { bookingCount: direction };
-    return { [sortBy]: direction };
+    const cleanSortBy = typeof sortBy === "string" ? sortBy.trim() : "createdAt";
+
+    switch (cleanSortBy) {
+        case "rating":
+            return { "rating.average": direction, "rating.count": direction, createdAt: -1 };
+        case "price":
+            return { "price.perPerson": direction, createdAt: -1 };
+        case "clicks":
+            return { clicks: direction, createdAt: -1 };
+        case "bookings":
+        case "bookingCount":
+            return { bookingCount: direction, createdAt: -1 };
+        case "saves":
+        case "savesCount":
+            return { savesCount: direction, createdAt: -1 };
+        case "title":
+            return { title: direction };
+        case "approvedAt":
+            return { approvedAt: direction, createdAt: -1 };
+        case "updatedAt":
+            return { updatedAt: direction };
+        case "createdAt":
+        default:
+            return { createdAt: direction };
+    }
 }
 
 export function calculatePagination(
     totalCount: number,
-    page: number = 1,
-    limit: number = 20
+    page: number | string = 1,
+    limit: number | string = 20
 ): PaginationDetails {
-    const pageNum = Math.max(1, parseInt(String(page)) || 1);
-    const limitNum = Math.max(1, parseInt(String(limit)) || 20);
-    const totalPages = Math.ceil(totalCount / limitNum);
+    const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+    const parsedLimit = parseInt(String(limit), 10) || 20;
+    const limitNum = Math.max(1, Math.min(100, parsedLimit));
+    const totalPages = totalCount > 0 ? Math.ceil(totalCount / limitNum) : 0;
     return {
         currentPage: pageNum,
         totalPages,
         totalResults: totalCount,
         resultsPerPage: limitNum,
         hasNextPage: pageNum < totalPages,
-        hasPrevPage: pageNum > 1
+        hasPrevPage: pageNum > 1 && totalPages > 0
     };
 }
 
@@ -173,9 +197,15 @@ export function buildRangeCondition(
     minVal?: number | string,
     maxVal?: number | string
 ): Record<string, number> | null {
-    const min = minVal !== undefined && minVal !== "" && minVal !== null ? parseFloat(String(minVal)) : NaN;
-    const max = maxVal !== undefined && maxVal !== "" && maxVal !== null ? parseFloat(String(maxVal)) : NaN;
+    let min = minVal !== undefined && minVal !== "" && minVal !== null ? parseFloat(String(minVal)) : NaN;
+    let max = maxVal !== undefined && maxVal !== "" && maxVal !== null ? parseFloat(String(maxVal)) : NaN;
     if (isNaN(min) && isNaN(max)) return null;
+
+    if (!isNaN(min) && !isNaN(max) && min > max) {
+        // Gracefully swap if inverted
+        [min, max] = [max, min];
+    }
+
     const cond: Record<string, number> = {};
     if (!isNaN(min)) cond.$gte = min;
     if (!isNaN(max)) cond.$lte = max;
@@ -183,7 +213,7 @@ export function buildRangeCondition(
 }
 
 export function buildExperienceTextCondition(q: string): Record<string, any> | null {
-    if (!q || !q.trim()) return null;
+    if (!q || typeof q !== "string" || !q.trim()) return null;
     const escaped = escapeRegex(q.trim());
     return {
         $or: [
@@ -194,39 +224,55 @@ export function buildExperienceTextCondition(q: string): Record<string, any> | n
             { "location.state": { $regex: escaped, $options: "i" } },
             { "location.country": { $regex: escaped, $options: "i" } },
             { "location.address": { $regex: escaped, $options: "i" } },
-            { categories: { $regex: escaped, $options: "i" } }
+            { "location.meetingPoint": { $regex: escaped, $options: "i" } },
+            { "location.startPoint": { $regex: escaped, $options: "i" } },
+            { categories: { $regex: escaped, $options: "i" } },
+            { tags: { $regex: escaped, $options: "i" } }
         ]
     };
 }
 
 export function buildExperienceLocationCondition(location: string): Record<string, any> | null {
-    if (!location || !location.trim()) return null;
+    if (!location || typeof location !== "string" || !location.trim()) return null;
     const escaped = escapeRegex(location.trim());
     return {
         $or: [
             { "location.city": { $regex: escaped, $options: "i" } },
             { "location.state": { $regex: escaped, $options: "i" } },
-            { "location.country": { $regex: escaped, $options: "i" } }
+            { "location.country": { $regex: escaped, $options: "i" } },
+            { "location.address": { $regex: escaped, $options: "i" } }
         ]
     };
 }
 
 export function buildUserTextCondition(q: string): Record<string, any> | null {
-    if (!q || !q.trim()) return null;
-    const escaped = escapeRegex(q.trim());
-    return {
-        $or: [
-            { firstname: { $regex: escaped, $options: "i" } },
-            { lastname: { $regex: escaped, $options: "i" } },
-            { email: { $regex: escaped, $options: "i" } },
-            { "location.city": { $regex: escaped, $options: "i" } },
-            { "location.state": { $regex: escaped, $options: "i" } },
-            { "location.country": { $regex: escaped, $options: "i" } },
-            { "location.address": { $regex: escaped, $options: "i" } },
-            { bio: { $regex: escaped, $options: "i" } },
-            { description: { $regex: escaped, $options: "i" } }
-        ]
-    };
+    if (!q || typeof q !== "string" || !q.trim()) return null;
+    const trimmed = q.trim();
+    const escaped = escapeRegex(trimmed);
+
+    const conditions: Record<string, any>[] = [
+        { firstname: { $regex: escaped, $options: "i" } },
+        { lastname: { $regex: escaped, $options: "i" } },
+        { email: { $regex: escaped, $options: "i" } },
+        { "location.city": { $regex: escaped, $options: "i" } },
+        { "location.state": { $regex: escaped, $options: "i" } },
+        { "location.country": { $regex: escaped, $options: "i" } },
+        { "location.address": { $regex: escaped, $options: "i" } },
+        { description: { $regex: escaped, $options: "i" } },
+        { interests: { $regex: escaped, $options: "i" } }
+    ];
+
+    const words = trimmed.split(/\s+/).filter(Boolean);
+    if (words.length >= 2) {
+        conditions.push({
+            $and: [
+                { firstname: { $regex: escapeRegex(words[0]), $options: "i" } },
+                { lastname: { $regex: escapeRegex(words.slice(1).join(" ")), $options: "i" } }
+            ]
+        });
+    }
+
+    return { $or: conditions };
 }
 
 /* ---------------- Search Service Class ---------------- */
@@ -267,6 +313,10 @@ export class SearchService {
             );
         }
         return this.instance;
+    }
+
+    public static resetInstance(): void {
+        this.instance = null;
     }
 
     /**
@@ -311,8 +361,9 @@ export class SearchService {
         } = options;
 
         const effectiveLocation = (location || city || "").trim();
-        const pageNum = Math.max(1, parseInt(String(page)) || 1);
-        const limitNum = Math.max(1, parseInt(String(limit)) || 20);
+        const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+        const parsedLimit = parseInt(String(limit), 10) || 20;
+        const limitNum = Math.max(1, Math.min(100, parsedLimit));
         const skip = (pageNum - 1) * limitNum;
         const searchType = normalizeSearchType(type);
 
@@ -323,7 +374,10 @@ export class SearchService {
 
         // 1. Search Experiences
         if (searchType === "all" || ["experience", "trek", "service"].includes(searchType)) {
-            const postQuery: any = { status: "active" };
+            const postQuery: any = {
+                status: "active",
+                isHidden: { $ne: true }
+            };
 
             if (searchType === "trek") {
                 postQuery.categories = { $in: ["Trek", "Trekking", "trek", "trekking"] };
@@ -349,15 +403,25 @@ export class SearchService {
             totalPostCount = totalCount;
             postResults = items.map((item: any) => ({
                 ...item,
-                rating: item.rating?.average ?? (typeof item.rating === "number" ? item.rating : 0)
+                rating: item.rating?.average ?? (typeof item.rating === "number" ? item.rating : 0),
+                averageRating: item.rating?.average ?? (typeof item.rating === "number" ? item.rating : 0),
+                ratingData: item.rating && typeof item.rating === "object" ? item.rating : { average: item.rating || 0, count: 0 }
             }));
         }
 
         // 2. Search People
         if (searchType === "all" || ["people", "host", "guest"].includes(searchType)) {
-            const userQuery: any = {};
-            if (searchType === "host") userQuery.role = "host";
-            if (searchType === "guest") userQuery.role = { $in: ["guest", "user"] };
+            const userQuery: any = {
+                isDeleted: { $ne: true }
+            };
+
+            if (searchType === "host") {
+                userQuery.role = "host";
+            } else if (searchType === "guest") {
+                userQuery.role = { $in: ["guest", "user"] };
+            } else {
+                userQuery.role = { $ne: "admin" };
+            }
 
             const userAndConditions: any[] = [];
             const userTextCond = q ? buildUserTextCondition(q) : null;
@@ -385,9 +449,9 @@ export class SearchService {
         }
 
         const totalResults = totalPostCount + totalUserCount;
-        const totalPages = Math.ceil(
-            (["people", "host", "guest"].includes(searchType) ? totalUserCount : totalPostCount) / limitNum
-        );
+        const paginatedStreamTotal = ["people", "host", "guest"].includes(searchType) ? totalUserCount : totalPostCount;
+        const pagination = calculatePagination(paginatedStreamTotal, pageNum, limitNum);
+        pagination.totalResults = totalResults;
 
         let combinedResults: any[];
         if (["people", "host", "guest"].includes(searchType)) {
@@ -406,12 +470,7 @@ export class SearchService {
             people: userResults,
             experiences: postResults,
             posts: postResults,
-            pagination: {
-                currentPage: pageNum,
-                totalPages,
-                totalResults,
-                resultsPerPage: limitNum
-            },
+            pagination,
             filters: {
                 query: q || null,
                 type: searchType,
@@ -441,53 +500,85 @@ export class SearchService {
             limit = 20
         } = options;
 
-        const effectiveTypes = experienceTypes || postTypes;
-        const query: any = { status: "active" };
+        const effectiveTypes = (experienceTypes || postTypes);
+        const typesList = (Array.isArray(effectiveTypes) ? effectiveTypes : [effectiveTypes])
+            .map(t => (typeof t === "string" ? t.trim().toLowerCase() : ""))
+            .filter(Boolean);
 
-        if (
-            effectiveTypes &&
-            effectiveTypes.length > 0 &&
-            effectiveTypes.includes("trek") &&
-            !effectiveTypes.includes("experience") &&
-            !effectiveTypes.includes("all")
-        ) {
-            query.categories = { $in: ["Trek", "Trekking", "trek", "trekking"] };
-        }
+        const query: any = {
+            status: "active",
+            isHidden: { $ne: true }
+        };
 
         const andConditions: any[] = [];
-        if (searchText && searchText.trim()) {
+
+        if (
+            typesList.length > 0 &&
+            typesList.includes("trek") &&
+            !typesList.includes("experience") &&
+            !typesList.includes("all")
+        ) {
+            andConditions.push({ categories: { $in: ["Trek", "Trekking", "trek", "trekking"] } });
+        }
+
+        if (searchText && typeof searchText === "string" && searchText.trim()) {
             const textCond = buildExperienceTextCondition(searchText);
             if (textCond) andConditions.push(textCond);
         }
 
-        if (locations && locations.length > 0) {
-            const locRegexes = locations.map(l => new RegExp(escapeRegex(l), "i"));
+        const locArray = (Array.isArray(locations) ? locations : [locations])
+            .map(l => (typeof l === "string" ? l.trim() : ""))
+            .filter(Boolean);
+
+        if (locArray.length > 0) {
+            const locRegexes = locArray.map(l => new RegExp(escapeRegex(l), "i"));
             andConditions.push({
                 $or: [
                     { "location.city": { $in: locRegexes } },
-                    { "location.country": { $in: locRegexes } }
+                    { "location.state": { $in: locRegexes } },
+                    { "location.country": { $in: locRegexes } },
+                    { "location.address": { $in: locRegexes } }
                 ]
             });
         }
 
-        if (andConditions.length > 0) query.$and = andConditions;
-        if (difficulties && difficulties.length > 0) query.difficulty = { $in: difficulties };
-        if (categories && categories.length > 0) query.categories = { $in: expandCategories(categories) };
+        const categoriesList = (Array.isArray(categories) ? categories : [categories])
+            .map(c => (typeof c === "string" ? c.trim() : ""))
+            .filter(Boolean);
 
-        const priceCond = buildRangeCondition(priceRange.min, priceRange.max);
+        if (categoriesList.length > 0) {
+            andConditions.push({ categories: { $in: expandCategories(categoriesList) } });
+        }
+
+        if (andConditions.length > 0) query.$and = andConditions;
+
+        const diffList = (Array.isArray(difficulties) ? difficulties : [difficulties])
+            .map(d => (typeof d === "string" ? d.trim() : ""))
+            .filter(Boolean);
+        if (diffList.length > 0) query.difficulty = { $in: diffList };
+
+        const priceCond = buildRangeCondition(priceRange?.min, priceRange?.max);
         if (priceCond) query["price.perPerson"] = priceCond;
 
-        const durationCond = buildRangeCondition(durationRange.minDays, durationRange.maxDays);
+        const durationCond = buildRangeCondition(durationRange?.minDays, durationRange?.maxDays);
         if (durationCond) query["duration.days"] = durationCond;
 
-        if (amenities && amenities.length > 0) query.amenities = { $all: amenities };
+        const amenityList = (Array.isArray(amenities) ? amenities : [amenities])
+            .map(a => (typeof a === "string" ? a.trim() : ""))
+            .filter(Boolean);
+        if (amenityList.length > 0) query.amenities = { $all: amenityList };
+
         if (rating !== null && rating !== undefined && rating !== "") {
-            query["rating.average"] = { $gte: parseFloat(String(rating)) };
+            const parsedRating = parseFloat(String(rating));
+            if (!isNaN(parsedRating) && parsedRating > 0) {
+                query["rating.average"] = { $gte: parsedRating };
+            }
         }
 
         const sortOptions = buildSortOptions(sortBy, sortOrder);
-        const pageNum = Math.max(1, parseInt(String(page)) || 1);
-        const limitNum = Math.max(1, parseInt(String(limit)) || 20);
+        const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+        const parsedLimit = parseInt(String(limit), 10) || 20;
+        const limitNum = Math.max(1, Math.min(100, parsedLimit));
         const skip = (pageNum - 1) * limitNum;
 
         const { items, totalCount } = await this.executeExperienceQuery(query, sortOptions, skip, limitNum);
@@ -502,7 +593,7 @@ export class SearchService {
      * Autocomplete suggestions for quick search
      */
     public async getSearchSuggestions(query: string): Promise<SearchSuggestionsResult> {
-        if (!query || !query.trim()) {
+        if (!query || typeof query !== "string" || !query.trim()) {
             const err: any = new Error("Query parameter 'q' is required");
             err.statusCode = 400;
             throw err;
@@ -511,19 +602,25 @@ export class SearchService {
         const escaped = escapeRegex(query.trim());
         const suggestions = await this.experienceModel.find({
             status: "active",
+            isHidden: { $ne: true },
             $or: [
                 { title: { $regex: escaped, $options: "i" } },
-                { "location.city": { $regex: escaped, $options: "i" } }
+                { "location.city": { $regex: escaped, $options: "i" } },
+                { "location.state": { $regex: escaped, $options: "i" } },
+                { "location.country": { $regex: escaped, $options: "i" } },
+                { categories: { $regex: escaped, $options: "i" } },
+                { tags: { $regex: escaped, $options: "i" } }
             ]
         })
-            .select("title location.city")
+            .select("title location.city location.state location.country")
             .limit(10)
             .lean();
 
         return {
             suggestions: suggestions.map((item: any) => ({
+                id: item._id ? String(item._id) : undefined,
                 text: item.title,
-                location: item.location?.city || "",
+                location: item.location?.city || item.location?.state || item.location?.country || "",
                 type: "experience"
             }))
         };
@@ -536,30 +633,43 @@ export class SearchService {
         const {
             location,
             type = "all",
+            category,
+            difficulty,
             sortBy = "createdAt",
             sortOrder = "desc",
             page = 1,
             limit = 20
         } = options;
 
-        if (!location || !location.trim()) {
+        if (!location || typeof location !== "string" || !location.trim()) {
             const err: any = new Error("Location parameter is required");
             err.statusCode = 400;
             throw err;
         }
 
+        const locCond = buildExperienceLocationCondition(location);
         const query: any = {
             status: "active",
-            ...buildExperienceLocationCondition(location)
+            isHidden: { $ne: true },
+            ...(locCond || {})
         };
 
         if (normalizeSearchType(type) === "trek") {
             query.categories = { $in: ["Trek", "Trekking", "trek", "trekking"] };
         }
 
+        if (category && typeof category === "string" && category.trim()) {
+            query.categories = { $in: expandCategories(category.trim()) };
+        }
+
+        if (difficulty && typeof difficulty === "string" && difficulty.trim()) {
+            query.difficulty = difficulty.trim();
+        }
+
         const sortOptions = buildSortOptions(sortBy, sortOrder);
-        const pageNum = Math.max(1, parseInt(String(page)) || 1);
-        const limitNum = Math.max(1, parseInt(String(limit)) || 20);
+        const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+        const parsedLimit = parseInt(String(limit), 10) || 20;
+        const limitNum = Math.max(1, Math.min(100, parsedLimit));
         const skip = (pageNum - 1) * limitNum;
 
         const { items, totalCount } = await this.executeExperienceQuery(query, sortOptions, skip, limitNum);

@@ -61,8 +61,8 @@ Handles guest reviews for hosts and experiences, verified completion requirement
 ### 1.3 Delete Review
 * **Method**: `DELETE`
 * **Path**: `/api/reviews/:id`
-* **Auth**: Required (`checkAuth` - author only)
-* **Success Response (200)**: Removes review and recalculates experience and host ratings.
+* **Auth**: Required (`checkAuth` - review author or `admin`)
+* **Success Response (200)**: Removes review and automatically recalculates experience and host ratings.
 
 ---
 
@@ -76,12 +76,15 @@ Handles guest reviews for hosts and experiences, verified completion requirement
   ```json
   {
     "success": true,
-    "eligible": true
+    "eligible": true,
+    "canReview": true,
+    "hasReviewed": false,
+    "existingReview": null
   }
   ```
 * **Failure Responses (200 with `eligible: false`)**:
   * Reason: `"host_restricted"` (User is a host)
-  * Reason: `"not_booked"` (Guest never booked this experience)
+  * Reason: `"not_booked"` (Guest never booked this experience or host)
   * Reason: `"not_completed"` (Booking is pending or ongoing, not completed)
 
 ---
@@ -92,7 +95,7 @@ Handles guest reviews for hosts and experiences, verified completion requirement
 * **Auth**: Public
 * **Query Parameters**:
   * `page`: `number` (default: 1)
-  * `limit`: `number` (default: 20)
+  * `limit`: `number` (default: 20, max: 100)
   * `rating`: `number` (Filter by specific star rating: 1-5)
   * `includeRatingOnly`: `"true"` | `"false"`
 * **Success Response (200)**:

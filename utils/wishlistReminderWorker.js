@@ -47,7 +47,7 @@ function startWishlistReminderWorker(app) {
                         message: notifMessage,
                         type: 'info',
                         link: `/experience/${expId}`,
-                        metadata: { experienceId: expId, postId: expId }
+                        metadata: { experienceId: expId }
                     });
                 } catch (notifErr) {
                     console.error("Failed to create reminder bell notification:", notifErr);

@@ -12,11 +12,16 @@ export interface GetExperiencesOptions {
     status?: string;
     difficulty?: string;
     categories?: string | string[];
+    category?: string | string[];
+    categoryFilter?: string | string[];
     isFeatured?: boolean | string;
     page?: number | string;
     limit?: number | string;
     sort?: string;
-    categoryFilter?: string | string[];
+    search?: string;
+    q?: string;
+    host?: string;
+    isAdmin?: boolean;
 }
 
 export interface PaginatedExperiencesResult {
@@ -96,6 +101,7 @@ export interface NormalizedExperienceFields {
     difficulty?: string;
     isFeatured?: boolean;
     availability?: any;
+    tags?: string[];
 }
 
 /** Standard projection for experience listing cards */
@@ -131,7 +137,20 @@ export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2
     return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
-/** Expand special category names such as 'others' or 'other' */
+/** Canonical list of allowed experience categories */
+export const ALLOWED_EXPERIENCE_CATEGORIES = [
+    'Bungee Jumping',
+    'Paragliding',
+    'Trek',
+    'Camping',
+    'Rafting',
+    'Safari',
+    'Rock Climbing',
+    'Flyboarding',
+    'Others'
+] as const;
+
+/** Expand special category names such as casing/synonyms strictly within supported categories */
 export function expandCategories(categories: string | string[]): string[] {
     if (!categories) return [];
     const list = Array.isArray(categories) ? categories : String(categories).split(',');
@@ -139,7 +158,31 @@ export function expandCategories(categories: string | string[]): string[] {
         const trimmed = String(c).trim();
         const lc = trimmed.toLowerCase();
         if (lc === 'others' || lc === 'other') {
-            return ['Others', 'Other', 'Rock Climbing', 'Flyboarding', 'rock-climbing', 'flyboarding'];
+            return ['Others', 'Other'];
+        }
+        if (lc === 'bungee jumping' || lc === 'bungee') {
+            return ['Bungee Jumping', 'Bungee jumping'];
+        }
+        if (lc === 'paragliding') {
+            return ['Paragliding'];
+        }
+        if (lc === 'trek' || lc === 'trekking') {
+            return ['Trek', 'trek'];
+        }
+        if (lc === 'camping') {
+            return ['Camping'];
+        }
+        if (lc === 'rafting') {
+            return ['Rafting'];
+        }
+        if (lc === 'safari') {
+            return ['Safari', 'safari'];
+        }
+        if (lc === 'rock climbing' || lc === 'rock-climbing') {
+            return ['Rock Climbing'];
+        }
+        if (lc === 'flyboarding') {
+            return ['Flyboarding'];
         }
         return [trimmed];
     });
@@ -149,19 +192,29 @@ export function expandCategories(categories: string | string[]): string[] {
 export function buildCategoryFilter(categories: any): any {
     if (!categories) return undefined;
     const expCats = expandCategories(categories);
-    const list = Array.isArray(categories) ? categories : String(categories).split(',');
-    const isOther = list.some((c: any) => ['other', 'others'].includes(String(c).trim().toLowerCase()));
-    return isOther ? { $in: expCats, $nin: ['Safari', 'safari', 'SAFARI'] } : { $in: expCats };
+    return { $in: expCats };
 }
 
 /** Attach calculated distance to a list of trek documents */
 export function attachDistanceToTreks(treks: any[], refLat: number, refLng: number): any[] {
     return (treks || []).map((trek: any) => {
         const trekObj = typeof trek.toObject === 'function' ? trek.toObject() : { ...trek };
-        if (trek.location?.coordinates?.coordinates) {
-            const [trekLng, trekLat] = trek.location.coordinates.coordinates;
-            trekObj.distance = Math.round(calculateDistance(refLat, refLng, trekLat, trekLng) * 10) / 10;
-            trekObj.distanceUnit = 'km';
+        const coords = Array.isArray(trek.location?.coordinates)
+            ? trek.location.coordinates
+            : trek.location?.coordinates?.coordinates;
+        if (Array.isArray(coords) && coords.length >= 2) {
+            const [trekLng, trekLat] = coords;
+            if (typeof trekLat === "number" && typeof trekLng === "number" && !isNaN(trekLat) && !isNaN(trekLng)) {
+                trekObj.distance = Math.round(calculateDistance(refLat, refLng, trekLat, trekLng) * 10) / 10;
+                trekObj.distanceUnit = 'km';
+            }
+        } else if (trek.location?.latitude !== undefined && trek.location?.longitude !== undefined) {
+            const trekLat = Number(trek.location.latitude);
+            const trekLng = Number(trek.location.longitude);
+            if (!isNaN(trekLat) && !isNaN(trekLng)) {
+                trekObj.distance = Math.round(calculateDistance(refLat, refLng, trekLat, trekLng) * 10) / 10;
+                trekObj.distanceUnit = 'km';
+            }
         }
         return trekObj;
     });
@@ -183,7 +236,8 @@ export function getPlatformFeeRate(basePrice: number): number {
 /** Calculate pricing and platform fee breakdown for experience/trek */
 export function calculatePricingAndFees(priceObj: any): { basePrice: number; feeRate: number; platformFee: number; guestPrice: number; formattedDetails: string } {
     if (!priceObj) return { basePrice: 0, feeRate: 0, platformFee: 0, guestPrice: 0, formattedDetails: "N/A" };
-    const basePrice = Number(priceObj.perPerson || priceObj.amount || priceObj.total || 0);
+    const rawPrice = Number(priceObj.perPerson ?? priceObj.amount ?? priceObj.total ?? 0);
+    const basePrice = isNaN(rawPrice) ? 0 : Math.max(0, rawPrice);
     const feeRate = getPlatformFeeRate(basePrice);
     const platformFee = Math.round(basePrice * feeRate);
     const guestPrice = basePrice + platformFee;
@@ -224,8 +278,9 @@ export function parseExperiencePayload(payload: any, baseExperience: any = null)
         price, amenities, capacity, availability,
         priceTotal, pricePerPerson, maxPeople,
         duration, difficulty, categories, isFeatured,
-        city, state, country, meetingPoint, days, nights, period, minutes, hours,
-        privacyPolicy, discounts, season
+        city, state, country, address, meetingPoint, startPoint, endPoint,
+        days, nights, period, minutes, hours,
+        privacyPolicy, discounts, season, tags
     } = payload;
 
     const fields: NormalizedExperienceFields = {};
@@ -240,7 +295,10 @@ export function parseExperiencePayload(payload: any, baseExperience: any = null)
     if (city !== undefined) locObj.city = city;
     if (state !== undefined) locObj.state = state;
     if (country !== undefined) locObj.country = country;
+    if (address !== undefined) locObj.address = address;
     if (meetingPoint !== undefined) locObj.meetingPoint = meetingPoint;
+    if (startPoint !== undefined) locObj.startPoint = startPoint;
+    if (endPoint !== undefined) locObj.endPoint = endPoint;
     if (locObj.coordinates) {
         const isPoint = locObj.coordinates.type === 'Point' &&
             Array.isArray(locObj.coordinates.coordinates) &&
@@ -275,12 +333,30 @@ export function parseExperiencePayload(payload: any, baseExperience: any = null)
 
     if (amenities !== undefined) fields.amenities = parseIfJson(amenities) || [];
     if (privacyPolicy !== undefined) fields.privacyPolicy = parseIfJson(privacyPolicy) || [];
-    if (categories !== undefined) fields.categories = parseIfJson(categories) || [];
+    if (categories !== undefined) {
+        const rawCats = parseIfJson(categories);
+        const catList = Array.isArray(rawCats) ? rawCats : (rawCats ? [rawCats] : []);
+        fields.categories = catList.map((c: any) => {
+            const trimmed = String(c).trim();
+            const lc = trimmed.toLowerCase();
+            if (lc === 'bungee jumping' || lc === 'bungee') return 'Bungee Jumping';
+            if (lc === 'paragliding') return 'Paragliding';
+            if (lc === 'trek' || lc === 'trekking') return 'Trek';
+            if (lc === 'camping') return 'Camping';
+            if (lc === 'rafting') return 'Rafting';
+            if (lc === 'safari') return 'Safari';
+            if (lc === 'rock climbing' || lc === 'rock-climbing') return 'Rock Climbing';
+            if (lc === 'flyboarding') return 'Flyboarding';
+            if (lc === 'others' || lc === 'other') return 'Others';
+            return trimmed;
+        });
+    }
     if (discounts !== undefined) fields.discounts = parseIfJson(discounts) || [];
     if (season !== undefined) fields.season = parseIfJson(season) || undefined;
     if (difficulty !== undefined) fields.difficulty = difficulty || undefined;
     if (availability !== undefined) fields.availability = parseIfJson(availability);
     if (isFeatured !== undefined) fields.isFeatured = isFeatured === 'true' || isFeatured === true;
+    if (tags !== undefined) fields.tags = parseIfJson(tags) || [];
 
     return fields;
 }
@@ -289,7 +365,8 @@ export function parseExperiencePayload(payload: any, baseExperience: any = null)
 export function buildExperiencesFilter(options: GetExperiencesOptions): any {
     const {
         city, country, state, minPrice, maxPrice, status,
-        difficulty, categories, isFeatured
+        difficulty, categories, category, categoryFilter, isFeatured,
+        search, q
     } = options;
 
     const filter: any = {
@@ -301,16 +378,32 @@ export function buildExperiencesFilter(options: GetExperiencesOptions): any {
     if (state) filter["location.state"] = new RegExp(state, "i");
     if (country) filter["location.country"] = new RegExp(country, "i");
     if (difficulty) filter.difficulty = difficulty;
-    if (categories) {
-        const catFilter = buildCategoryFilter(categories);
-        if (catFilter) filter.categories = catFilter;
+
+    const catInput = categories || category || categoryFilter;
+    if (catInput) {
+        const cFilter = buildCategoryFilter(catInput);
+        if (cFilter) filter.categories = cFilter;
     }
+
     if (isFeatured !== undefined) filter.isFeatured = isFeatured === "true" || isFeatured === true;
     if (minPrice || maxPrice) {
         filter["price.perPerson"] = {};
         if (minPrice) filter["price.perPerson"].$gte = Number(minPrice);
         if (maxPrice) filter["price.perPerson"].$lte = Number(maxPrice);
     }
+
+    const term = (search || q || "").trim();
+    if (term) {
+        const regex = new RegExp(term, "i");
+        filter.$or = [
+            { title: regex },
+            { subtitle: regex },
+            { "location.city": regex },
+            { "location.address": regex },
+            { tags: regex }
+        ];
+    }
+
     return filter;
 }
 
@@ -372,5 +465,6 @@ module.exports = {
     buildExperiencesFilter,
     roundRobinMerge,
     cleanupMediaAssets,
-    deleteMediaAssets
+    deleteMediaAssets,
+    ALLOWED_EXPERIENCE_CATEGORIES
 };

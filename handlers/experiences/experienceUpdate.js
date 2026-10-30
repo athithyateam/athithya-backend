@@ -7,7 +7,7 @@ const updateExperience = async (req, res) => {
     try {
         const result = await experienceService.updateExperience(
             req.params.id,
-            req.user.userId,
+            req.user.userId || req.user.id,
             req.user.role,
             req.body,
             req.files,
@@ -35,12 +35,18 @@ const updateExperience = async (req, res) => {
 const updateExperienceStatus = async (req, res) => {
     try {
         const { status, remarks } = req.body;
-        const experience = await experienceService.updateExperienceStatus(req.params.id, status, remarks);
+        const result = await experienceService.updateExperienceStatus(
+            req.params.id,
+            status,
+            remarks,
+            req.user?.userId || req.user?.id,
+            req.app
+        );
 
         return res.status(200).json({
             success: true,
-            message: `Experience status updated to ${status}`,
-            experience
+            message: result?.message || `Experience status updated to ${status}`,
+            experience: result?.experience || result
         });
     } catch (err) {
         console.error("Update experience status error:", err);
@@ -59,7 +65,7 @@ const requestHideExperience = async (req, res) => {
         const { action, reason } = req.body;
         const result = await experienceService.toggleHideExperience(
             req.params.id,
-            req.user.userId,
+            req.user.userId || req.user.id,
             req.user.role,
             action,
             reason,

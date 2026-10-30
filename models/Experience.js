@@ -59,7 +59,17 @@ const experienceSchema = new mongoose.Schema({
     },
     categories: [{
         type: String,
-        enum: ['Adventure', 'Wildlife', 'Safari', 'Spiritual', 'Cultural', 'Beach', 'Mountain', 'Desert', 'Forest', 'Historical', 'Pilgrimage', 'Snow', 'Camping', 'Backpacking', 'Photography', 'Nature', 'Luxury', 'Budget', 'Trek', 'Rafting', 'Bungee jumping', 'Experience Guide', 'Paragliding', 'Flyboarding', 'Rock Climbing', 'Others', 'Other']
+        enum: [
+            'Bungee Jumping', 'Bungee jumping',
+            'Paragliding',
+            'Trek',
+            'Camping',
+            'Rafting',
+            'Safari',
+            'Rock Climbing',
+            'Flyboarding',
+            'Others', 'Other'
+        ]
     }],
     season: {
         months: {
@@ -139,9 +149,15 @@ const experienceSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    deleteRequestedAt: {
+        type: Date
+    },
     isHidden: {
         type: Boolean,
         default: false
+    },
+    hiddenAt: {
+        type: Date
     },
     hideRequested: {
         type: Boolean,
@@ -151,7 +167,14 @@ const experienceSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    unhideRequestedAt: {
+        type: Date
+    },
     hideReason: {
+        type: String,
+        default: ""
+    },
+    adminRemarks: {
         type: String,
         default: ""
     },
@@ -162,6 +185,7 @@ const experienceSchema = new mongoose.Schema({
 
 experienceSchema.index({ user: 1, createdAt: -1 });
 experienceSchema.index({ status: 1, createdAt: -1 });
+experienceSchema.index({ deleteRequested: 1, hideRequested: 1, unhideRequested: 1 });
 experienceSchema.index({ 'location.city': 1, 'location.country': 1 });
 experienceSchema.index({ categories: 1 });
 experienceSchema.index({ isFeatured: 1, status: 1 });

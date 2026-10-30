@@ -7,7 +7,7 @@ const saveExperience = async (req, res) => {
     try {
         const result = await experienceService.saveExperience(
             req.params.id,
-            req.user.userId,
+            req.user.userId || req.user.id,
             req.user.role
         );
 
@@ -28,7 +28,7 @@ const unsaveExperience = async (req, res) => {
     try {
         const result = await experienceService.unsaveExperience(
             req.params.id,
-            req.user.userId
+            req.user.userId || req.user.id
         );
 
         return res.status(200).json(result);

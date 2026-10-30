@@ -6,7 +6,7 @@ const { experienceService } = require("../../services/experienceService");
 const createExperience = async (req, res) => {
     try {
         const experience = await experienceService.createExperience(
-            req.user.userId,
+            req.user.userId || req.user.id,
             req.user.role,
             req.body,
             req.files,

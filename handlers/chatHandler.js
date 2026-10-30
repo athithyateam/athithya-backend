@@ -14,12 +14,14 @@ const getChatEligibility = async (req, res) => {
 // POST upload attachments (JSON payload, files pre-uploaded directly to S3)
 const sendMessageAttachments = async (req, res) => {
     try {
-        const { recipientId, text, attachments } = req.body;
+        const { recipientId, text, attachments, messageType, locationData } = req.body;
         const message = await chatService.sendMessage(req.user.userId, {
             conversationId: req.params.conversationId,
             recipientId,
             text,
-            attachments
+            attachments,
+            messageType,
+            locationData
         });
         res.status(201).json({ success: true, message });
     } catch (error) {

@@ -12,7 +12,8 @@ const { reviewService } = require("../services/reviewService");
  */
 const createReview = async (req, res) => {
     try {
-        const { hostId, experienceId, rating, comment } = req.body;
+        const body = req.body || {};
+        const { hostId, experienceId, rating, comment } = body;
         const result = await reviewService.createOrUpdateReview(
             req.user.userId,
             req.user.role,
@@ -127,10 +128,11 @@ const getReceivedReviews = async (req, res) => {
  */
 const checkReviewEligibility = async (req, res) => {
     try {
+        const experienceId = req.query.experienceId || req.query.id;
         const result = await reviewService.checkReviewEligibility(
             req.user.userId,
             req.user.role,
-            req.query.experienceId
+            experienceId
         );
         return res.status(200).json({
             success: true,
@@ -195,7 +197,7 @@ const updateReview = async (req, res) => {
         const updatedReview = await reviewService.updateReview(
             req.params.id,
             req.user.userId,
-            req.body
+            req.body || {}
         );
         return res.status(200).json({
             success: true,
@@ -212,12 +214,12 @@ const updateReview = async (req, res) => {
 };
 
 /**
- * Delete review by owner
+ * Delete review by owner or admin
  * DELETE /api/reviews/:id
  */
 const deleteReview = async (req, res) => {
     try {
-        await reviewService.deleteReview(req.params.id, req.user.userId);
+        await reviewService.deleteReview(req.params.id, req.user.userId, req.user.role);
         return res.status(200).json({
             success: true,
             message: "Review deleted successfully"
@@ -242,6 +244,5 @@ module.exports = {
     getReviewById,
     updateReview,
     deleteReview,
-    updateExperienceRating: (id) => reviewService.recalculateExperienceRating(id),
-    updatePostRating: (id) => reviewService.recalculateExperienceRating(id)
+    updateExperienceRating: (id) => reviewService.recalculateExperienceRating(id)
 };

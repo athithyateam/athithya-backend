@@ -29,7 +29,12 @@ import {
     attachDistanceToTreks,
     getPlatformFeeRate,
     recordHostAuditLog,
-    recordHostHistory
+    recordHostHistory,
+    buildExperiencesFilter,
+    roundRobinMerge,
+    cleanupMediaAssets,
+    deleteMediaAssets,
+    ALLOWED_EXPERIENCE_CATEGORIES
 } from "./experiences/experiencePayloadParser";
 
 export {
@@ -46,6 +51,11 @@ export {
     getPlatformFeeRate,
     recordHostAuditLog,
     recordHostHistory,
+    buildExperiencesFilter,
+    roundRobinMerge,
+    cleanupMediaAssets,
+    deleteMediaAssets,
+    ALLOWED_EXPERIENCE_CATEGORIES,
     GetExperiencesOptions,
     PaginatedExperiencesResult,
     ExperienceDetailResult,
@@ -89,8 +99,8 @@ export class ExperienceService {
         return this.actionService.updateExperience(experienceId, userId, userRole, updatePayload, files, reqOrApp);
     }
 
-    public async updateExperienceStatus(experienceId: string, status: string, remarks?: string): Promise<any> {
-        return this.actionService.updateExperienceStatus(experienceId, status, remarks);
+    public async updateExperienceStatus(experienceId: string, status: string, remarks?: string, adminUserId?: string, reqOrApp?: any): Promise<any> {
+        return this.actionService.updateExperienceStatus(experienceId, status, remarks, adminUserId, reqOrApp);
     }
 
     public async toggleHideExperience(experienceId: string, userId: string, userRole: string, action: string, reason?: string, reqOrApp?: any): Promise<any> {
@@ -126,8 +136,8 @@ export class ExperienceService {
         return this.actionService.getNearbyTreks(options);
     }
 
-    public async getUserExperiences(userId: string): Promise<any[]> {
-        return this.actionService.getUserExperiences(userId);
+    public async getUserExperiences(userId: string, isSelfOrAdmin?: boolean): Promise<any[]> {
+        return this.actionService.getUserExperiences(userId, isSelfOrAdmin);
     }
 
     public async getPendingExperiences(options?: GetPendingExperiencesOptions): Promise<PaginatedExperiencesResult> {
@@ -145,7 +155,7 @@ export default ExperienceService;
 // Convenience bound exports
 export const createExperience = (userId: string, userRole: string, experiencePayload: any, files?: any, reqOrApp?: any) => experienceService.createExperience(userId, userRole, experiencePayload, files, reqOrApp);
 export const updateExperience = (experienceId: string, userId: string, userRole: string, updatePayload: any, files?: any, reqOrApp?: any) => experienceService.updateExperience(experienceId, userId, userRole, updatePayload, files, reqOrApp);
-export const updateExperienceStatus = (experienceId: string, status: string, remarks?: string) => experienceService.updateExperienceStatus(experienceId, status, remarks);
+export const updateExperienceStatus = (experienceId: string, status: string, remarks?: string, adminUserId?: string, reqOrApp?: any) => experienceService.updateExperienceStatus(experienceId, status, remarks, adminUserId, reqOrApp);
 export const toggleHideExperience = (experienceId: string, userId: string, userRole: string, action: string, reason?: string, reqOrApp?: any) => experienceService.toggleHideExperience(experienceId, userId, userRole, action, reason, reqOrApp);
 export const deleteExperience = (experienceId: string, userId: string, userRole: string, reqOrApp?: any) => experienceService.deleteExperience(experienceId, userId, userRole, reqOrApp);
 export const saveExperience = (experienceId: string, userId: string, userRole: string) => experienceService.saveExperience(experienceId, userId, userRole);
@@ -154,7 +164,7 @@ export const getExperiences = (options?: GetExperiencesOptions) => experienceSer
 export const getExperienceDetail = (experienceId: string) => experienceService.getExperienceDetail(experienceId);
 export const getTopRatedTreks = (options?: GetTopRatedTreksOptions) => experienceService.getTopRatedTreks(options);
 export const getNearbyTreks = (options?: GetNearbyTreksOptions) => experienceService.getNearbyTreks(options);
-export const getUserExperiences = (userId: string) => experienceService.getUserExperiences(userId);
+export const getUserExperiences = (userId: string, isSelfOrAdmin?: boolean) => experienceService.getUserExperiences(userId, isSelfOrAdmin);
 export const getPendingExperiences = (options?: GetPendingExperiencesOptions) => experienceService.getPendingExperiences(options);
 export const getCategoryActivity = () => experienceService.getCategoryActivity();
 
@@ -189,4 +199,9 @@ module.exports.attachDistanceToTreks = attachDistanceToTreks;
 module.exports.getPlatformFeeRate = getPlatformFeeRate;
 module.exports.recordHostAuditLog = recordHostAuditLog;
 module.exports.recordHostHistory = recordHostHistory;
+module.exports.buildExperiencesFilter = buildExperiencesFilter;
+module.exports.roundRobinMerge = roundRobinMerge;
+module.exports.cleanupMediaAssets = cleanupMediaAssets;
+module.exports.deleteMediaAssets = deleteMediaAssets;
+module.exports.ALLOWED_EXPERIENCE_CATEGORIES = ALLOWED_EXPERIENCE_CATEGORIES;
 module.exports.ExperienceActionService = ExperienceActionService;

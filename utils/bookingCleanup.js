@@ -80,7 +80,7 @@ const checkExpiredGroupBookings = async () => {
                         message: `The initiator who invited you to the experience "${experienceTitle}" has not completed their payment. We have sent a request to the host to see if they would like to accept your booking at your discounted price.`,
                         type: 'orphaned_invite_friend_alert',
                         link: `/bookings/${friendBooking._id}`,
-                        metadata: { postId: friendBooking.post, bookingId: friendBooking._id },
+                        metadata: { experienceId: friendBooking.experience || friendBooking.post, bookingId: friendBooking._id },
                         emailSubject: friendSubject,
                         emailHtml: friendHtml
                     });

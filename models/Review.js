@@ -15,33 +15,33 @@ reviewSchema.index({ experience: 1, createdAt: -1 });
 
 // Function to update experience rating
 reviewSchema.statics.calculateAverageRating = async function (experienceId) {
-    if (!experienceId) return;
+    if (!experienceId || !mongoose.Types.ObjectId.isValid(experienceId)) return;
 
-    const targetObjId = new mongoose.Types.ObjectId(experienceId);
-    const stats = await this.aggregate([
-        { 
-            $match: { experience: targetObjId } 
-        },
-        {
-            $group: {
-                _id: null,
-                nRating: { $sum: 1 },
-                avgRating: { $avg: '$rating' }
+    try {
+        const targetObjId = new mongoose.Types.ObjectId(experienceId);
+        const stats = await this.aggregate([
+            { 
+                $match: { experience: targetObjId } 
+            },
+            {
+                $group: {
+                    _id: null,
+                    nRating: { $sum: 1 },
+                    avgRating: { $avg: '$rating' }
+                }
             }
-        }
-    ]);
+        ]);
 
-    const ExperienceModel = mongoose.models.experience || mongoose.model('experience');
-    if (stats.length > 0) {
-        await ExperienceModel.findByIdAndUpdate(experienceId, {
-            'rating.count': stats[0].nRating,
-            'rating.average': Math.round(stats[0].avgRating * 10) / 10
+        const ExperienceModel = mongoose.models.experience || mongoose.model('experience');
+        const count = stats.length > 0 ? stats[0].nRating : 0;
+        const average = stats.length > 0 ? Math.round(stats[0].avgRating * 10) / 10 : 0;
+
+        await ExperienceModel.findByIdAndUpdate(targetObjId, {
+            'rating.count': count,
+            'rating.average': average
         });
-    } else {
-        await ExperienceModel.findByIdAndUpdate(experienceId, {
-            'rating.count': 0,
-            'rating.average': 0
-        });
+    } catch (err) {
+        console.error("Error calculating average rating in Review model hook:", err);
     }
 };
 

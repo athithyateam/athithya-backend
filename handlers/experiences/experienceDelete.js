@@ -7,7 +7,7 @@ const deleteExperience = async (req, res) => {
     try {
         const result = await experienceService.deleteExperience(
             req.params.id,
-            req.user.userId,
+            req.user.userId || req.user.id,
             req.user.role,
             req.app
         );

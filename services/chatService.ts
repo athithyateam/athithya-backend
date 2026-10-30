@@ -42,6 +42,24 @@ export class ChatService {
         this.userModel = um;
         this.bookingModel = bm;
         this.storageService = ss;
+
+        // Bind all methods for safe destructuring
+        this.checkEligibility = this.checkEligibility.bind(this);
+        this.getChatEligibility = this.getChatEligibility.bind(this);
+        this.getUserConversations = this.getUserConversations.bind(this);
+        this.getMessages = this.getMessages.bind(this);
+        this.getOrCreateConversation = this.getOrCreateConversation.bind(this);
+        this.createGroup = this.createGroup.bind(this);
+        this.updateGroup = this.updateGroup.bind(this);
+        this.leaveGroup = this.leaveGroup.bind(this);
+        this.deleteConversation = this.deleteConversation.bind(this);
+        this.clearConversation = this.clearConversation.bind(this);
+        this.sendMessage = this.sendMessage.bind(this);
+        this.markConversationAsRead = this.markConversationAsRead.bind(this);
+        this.deleteMessage = this.deleteMessage.bind(this);
+        this.sendHostBookingWelcome = this.sendHostBookingWelcome.bind(this);
+        this.sendWelcomeChatMessage = this.sendWelcomeChatMessage.bind(this);
+        this.getAdminChatActivity = this.getAdminChatActivity.bind(this);
     }
 
     public static getInstance(...args: any[]): ChatService {
@@ -58,6 +76,9 @@ export class ChatService {
     public async getChatEligibility(conversationId: string, userId: string): Promise<ChatEligibilityResult> {
         const conv = await this.conversationModel.findById(conversationId);
         if (!conv) throw Object.assign(new Error("Conversation not found"), { statusCode: 404 });
+        if (!conv.participants.some((p: any) => String(p._id || p) === String(userId))) {
+            throw Object.assign(new Error("Unauthorized: You are not a participant in this conversation"), { statusCode: 403 });
+        }
         if (conv.isGroup) return { canChat: true };
 
         const targetUser = conv.participants.find((p: any) => String(p._id || p) !== String(userId));
@@ -87,9 +108,13 @@ export class ChatService {
             throw Object.assign(new Error(eligibility.reason || "You are not eligible to start a conversation with this user."), { statusCode: 403, eligibility });
         }
 
-        let conv = await this.conversationModel.findOne({ participants: { $all: [senderId, recipientId], $size: 2 } });
+        let conv = await this.conversationModel.findOne({
+            isGroup: { $ne: true },
+            participants: { $all: [senderId, recipientId], $size: 2 }
+        });
         if (!conv) {
             conv = await this.conversationModel.create({
+                isGroup: false,
                 participants: [senderId, recipientId],
                 unreadCounts: new Map([[senderId, 0], [recipientId, 0]])
             });
@@ -163,8 +188,21 @@ export class ChatService {
         const updateData: any = { participants: updatedParticipants };
         if (String(conv.groupMetadata?.admin) === String(userId)) updateData["groupMetadata.admin"] = updatedParticipants[0];
 
-        const updatedGroup = await this.conversationModel.findByIdAndUpdate(conversationId, { $set: updateData }, { new: true })
-            .populate("participants", "firstname lastname avatar role");
+        const updatedGroup = await this.conversationModel.findByIdAndUpdate(
+            conversationId,
+            { $set: updateData, $unset: { [`unreadCounts.${userId}`]: "" } },
+            { new: true }
+        ).populate("participants", "firstname lastname avatar role");
+
+        const leavingUser = await this.userModel.findById(userId);
+        const name = `${leavingUser?.firstname || ""} ${leavingUser?.lastname || ""}`.trim() || "A member";
+        await this.messageModel.create({
+            conversationId,
+            sender: userId,
+            messageType: "system",
+            text: `${name} left the group.`
+        });
+
         return { deleted: false, conversation: updatedGroup };
     }
 
@@ -174,6 +212,9 @@ export class ChatService {
         if (!conv.participants.some((p: any) => String(p) === String(userId))) throw Object.assign(new Error("Unauthorized to delete this conversation"), { statusCode: 403 });
         if (conv.isGroup && String(conv.groupMetadata?.admin) !== String(userId)) throw Object.assign(new Error("Only admin can delete the group plan"), { statusCode: 403 });
 
+        if (conv.groupMetadata?.avatar?.public_id) {
+            try { await this.storageService.deleteFile(conv.groupMetadata.avatar.public_id); } catch (e) {}
+        }
         await this.conversationModel.findByIdAndDelete(conversationId);
         await this.messageModel.deleteMany({ conversationId });
         return { success: true, message: "Conversation deleted permanently" };
@@ -221,10 +262,14 @@ export class ChatService {
 
         const unreadInc: Record<string, number> = {};
         if (conv.isGroup) {
-            conv.participants.forEach((p: any) => { if (String(p) !== String(senderId)) unreadInc[`unreadCounts.${p}`] = 1; });
+            conv.participants.forEach((p: any) => {
+                const pid = String(p._id || p);
+                if (pid !== String(senderId)) unreadInc[`unreadCounts.${pid}`] = 1;
+            });
         } else {
-            const target = recipientId || conv.participants.find((p: any) => String(p) !== String(senderId));
-            unreadInc[`unreadCounts.${target}`] = 1;
+            const rawTarget = recipientId || conv.participants.find((p: any) => String(p._id || p) !== String(senderId));
+            const targetUserId = String(rawTarget?._id || rawTarget);
+            unreadInc[`unreadCounts.${targetUserId}`] = 1;
         }
 
         const lastText = text || (parsedAttachments.length ? "Sent an attachment" : messageType === "location" ? "Shared a location" : "Sent a message");
@@ -237,10 +282,11 @@ export class ChatService {
 
         if (conv.isGroup) {
             conv.participants.forEach((p: any) => {
-                const pid = String(p);
+                const pid = String(p._id || p);
                 if (pid !== String(senderId)) {
                     notifyRecipientOfNewMessage(message.sender, pid, this.userModel);
                     emitChatRealtime(pid, "new_message", message);
+                    emitChatRealtime(pid, "new_chat_message", { conversationId: conv._id, message });
                 }
             });
         } else {
@@ -248,6 +294,7 @@ export class ChatService {
             const targetIdStr = String(rawTarget?._id || rawTarget);
             notifyRecipientOfNewMessage(message.sender, targetIdStr, this.userModel);
             emitChatRealtime(targetIdStr, "new_message", message);
+            emitChatRealtime(targetIdStr, "new_chat_message", { conversationId: conv._id, message });
         }
         emitChatRealtime(String(senderId), "message_sent", message);
 
@@ -277,11 +324,15 @@ export class ChatService {
     // ==================== AUTOMATED WORKFLOWS ====================
 
     private async sendAutomatedDirectMessage(sender: any, recipient: any, text: string): Promise<any> {
-        let conv = await this.conversationModel.findOne({ participants: { $all: [sender._id, recipient._id], $size: 2 } });
+        let conv = await this.conversationModel.findOne({
+            isGroup: { $ne: true },
+            participants: { $all: [sender._id, recipient._id], $size: 2 }
+        });
         if (!conv) {
             conv = await this.conversationModel.create({
+                isGroup: false,
                 participants: [sender._id, recipient._id],
-                unreadCounts: new Map([[sender._id.toString(), 0], [recipient._id.toString(), 1]])
+                unreadCounts: new Map([[sender._id.toString(), 0], [recipient._id.toString(), 0]])
             });
         }
 
@@ -331,7 +382,7 @@ export class ChatService {
         if (!admin) {
             admin = await this.userModel.findOne({ role: "admin", isOfficial: true }) || await this.userModel.findOne({ role: "admin" });
         }
-        if (!admin) return null;
+        if (!admin || String(admin._id) === String(user._id)) return null;
         return this.sendAutomatedDirectMessage(admin, user, welcomeText);
     }
 
@@ -428,8 +479,16 @@ export class ChatService {
 
             const pA = conv.participants?.[0] || null;
             const pB = conv.participants?.[1] || null;
-            const hostUser = pA?.role === "host" ? pA : pB;
-            const guestUser = pA?.role === "host" ? pB : pA;
+            const hasHost = pA?.role === "host" || pB?.role === "host";
+            let hostUser: any = null;
+            let guestUser: any = null;
+            if (hasHost) {
+                hostUser = pA?.role === "host" ? pA : pB;
+                guestUser = pA?.role === "host" ? pB : pA;
+            } else {
+                hostUser = null;
+                guestUser = pA;
+            }
 
             let bookingInfo = null;
             if (hostUser?._id && guestUser?._id) {
@@ -449,7 +508,7 @@ export class ChatService {
                 id: cid,
                 isGroup: false,
                 host: formatUserSummary(hostUser),
-                guest: formatUserSummary(guestUser),
+                guest: formatUserSummary(guestUser || pB),
                 booking: bookingInfo,
                 messageCount,
                 lastActivity: lastMsg?.createdAt || conv.updatedAt,
@@ -468,7 +527,42 @@ export class ChatService {
 export const chatService = ChatService.getInstance();
 export default ChatService;
 
+// Convenience function exports
+export const checkEligibility = chatService.checkEligibility;
+export const getChatEligibility = chatService.getChatEligibility;
+export const getUserConversations = chatService.getUserConversations;
+export const getMessages = chatService.getMessages;
+export const getOrCreateConversation = chatService.getOrCreateConversation;
+export const createGroup = chatService.createGroup;
+export const updateGroup = chatService.updateGroup;
+export const leaveGroup = chatService.leaveGroup;
+export const deleteConversation = chatService.deleteConversation;
+export const clearConversation = chatService.clearConversation;
+export const sendMessage = chatService.sendMessage;
+export const markConversationAsRead = chatService.markConversationAsRead;
+export const deleteMessage = chatService.deleteMessage;
+export const sendHostBookingWelcome = chatService.sendHostBookingWelcome;
+export const sendWelcomeChatMessage = chatService.sendWelcomeChatMessage;
+export const getAdminChatActivity = chatService.getAdminChatActivity;
+
+// CommonJS compatibility
 module.exports = chatService;
 module.exports.ChatService = ChatService;
 module.exports.chatService = chatService;
 module.exports.default = ChatService;
+module.exports.checkEligibility = checkEligibility;
+module.exports.getChatEligibility = getChatEligibility;
+module.exports.getUserConversations = getUserConversations;
+module.exports.getMessages = getMessages;
+module.exports.getOrCreateConversation = getOrCreateConversation;
+module.exports.createGroup = createGroup;
+module.exports.updateGroup = updateGroup;
+module.exports.leaveGroup = leaveGroup;
+module.exports.deleteConversation = deleteConversation;
+module.exports.clearConversation = clearConversation;
+module.exports.sendMessage = sendMessage;
+module.exports.markConversationAsRead = markConversationAsRead;
+module.exports.deleteMessage = deleteMessage;
+module.exports.sendHostBookingWelcome = sendHostBookingWelcome;
+module.exports.sendWelcomeChatMessage = sendWelcomeChatMessage;
+module.exports.getAdminChatActivity = getAdminChatActivity;
