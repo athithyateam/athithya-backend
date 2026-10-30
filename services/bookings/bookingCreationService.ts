@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { BadRequestError, NotFoundError, ForbiddenError } from "../../errors";
 const { Booking, Experience, User, GroupBooking, HostDetails } = require("../../db/mongoose");
-import { createRazorpayOrder, verifyRazorpaySignature, fetchPaymentDetails } from "../../utils/razorpay";
+import { paymentService as defaultPaymentService, PaymentService } from "../paymentService";
 import { sendHtmlEmail, renderBrandedEmail } from "../emailService";
 import { notificationService } from "../notificationService";
 import { getPlatformFeeRate } from "../experiences/experiencePayloadParser";
@@ -133,6 +133,7 @@ export class BookingCreationService {
     private userModel: any;
     private groupBookingModel: any;
     private hostDetailsModel: any;
+    private paymentService: PaymentService;
 
     constructor(
         instanceKey: symbol,
@@ -140,7 +141,8 @@ export class BookingCreationService {
         experienceModel: any = Experience,
         userModel: any = User,
         groupBookingModel: any = GroupBooking,
-        hostDetailsModel: any = HostDetails
+        hostDetailsModel: any = HostDetails,
+        paymentServiceInstance: PaymentService = defaultPaymentService
     ) {
         if (instanceKey !== BookingCreationService.instanceKey) {
             throw new Error("Please use BookingCreationService.getInstance()");
@@ -150,6 +152,7 @@ export class BookingCreationService {
         this.userModel = userModel;
         this.groupBookingModel = groupBookingModel;
         this.hostDetailsModel = hostDetailsModel;
+        this.paymentService = paymentServiceInstance;
     }
 
     public static getInstance(
@@ -157,7 +160,8 @@ export class BookingCreationService {
         experienceModel?: any,
         userModel?: any,
         groupBookingModel?: any,
-        hostDetailsModel?: any
+        hostDetailsModel?: any,
+        paymentServiceInstance?: PaymentService
     ): BookingCreationService {
         if (!this.instance) {
             this.instance = new BookingCreationService(
@@ -166,7 +170,8 @@ export class BookingCreationService {
                 experienceModel || Experience,
                 userModel || User,
                 groupBookingModel || GroupBooking,
-                hostDetailsModel || HostDetails
+                hostDetailsModel || HostDetails,
+                paymentServiceInstance || defaultPaymentService
             );
         }
         return this.instance;
@@ -247,7 +252,7 @@ export class BookingCreationService {
 
         let razorpayOrder: any = null;
         if (pricing.payableAmount > 0) {
-            razorpayOrder = await createRazorpayOrder(pricing.payableAmount);
+            razorpayOrder = await this.paymentService.createOrder(pricing.payableAmount);
         }
 
         const dates = parseBookingDates(startDate, selectedTime, endDate, experience.duration);
@@ -290,7 +295,7 @@ export class BookingCreationService {
             throw new BadRequestError("Missing payment verification details");
         }
 
-        if (!verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
+        if (!this.paymentService.verifySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
             throw new BadRequestError("Payment verification failed");
         }
 
@@ -303,7 +308,7 @@ export class BookingCreationService {
         booking.paymentStatus = "paid";
         booking.paymentId = razorpay_payment_id;
 
-        try { booking.paymentDetails = await fetchPaymentDetails(razorpay_payment_id); } catch (e) {}
+        try { booking.paymentDetails = await this.paymentService.fetchPaymentDetails(razorpay_payment_id); } catch (e) {}
         await booking.save();
 
         const groupResult = await this.processBookingConfirmation(booking);
