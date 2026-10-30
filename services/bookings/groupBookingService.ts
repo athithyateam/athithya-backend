@@ -158,7 +158,7 @@ export class GroupBookingService {
                     title: "Experience Invitation",
                     message: `${initiator.firstname} ${initiator.lastname} invited you to join: "${experience.title}"`,
                     type: 'invite_sent',
-                    link: `/experience/${expId}?groupBookingId=${groupBooking._id}`,
+                    link: `/experiences/${expId}?groupBookingId=${groupBooking._id}`,
                     metadata: { experienceId: expId, groupBookingId: groupBooking._id }
                 });
 
@@ -183,7 +183,7 @@ export class GroupBookingService {
      */
     public async removeInvitedFriend(experienceId: string, friendId: string, initiatorId: string): Promise<any> {
         const groupBooking = await this.groupBookingModel.findOne({
-            $or: [{ experience: experienceId }, { post: experienceId }],
+            experience: experienceId,
             initiator: initiatorId,
             status: 'planning'
         });
@@ -213,7 +213,7 @@ export class GroupBookingService {
      */
     public async getMyGroupBookings(userId: string): Promise<any[]> {
         return await this.groupBookingModel.find({ initiator: userId })
-            .populate('experience', 'title photos images price location')
+            .populate('experience', 'title photos price location')
             .populate('invitedPeople.user', 'firstname lastname avatar')
             .populate('bookingId')
             .sort({ createdAt: -1 });
@@ -225,7 +225,7 @@ export class GroupBookingService {
     public async getReceivedInvites(userId: string): Promise<any[]> {
         return await this.groupBookingModel.find({ 'invitedPeople.user': userId })
             .populate('initiator', 'firstname lastname avatar')
-            .populate('experience', 'title photos images price location')
+            .populate('experience', 'title photos price location')
             .populate('bookingId')
             .sort({ createdAt: -1 });
     }
@@ -294,7 +294,7 @@ export class GroupBookingService {
                 title: "Experience Invitation",
                 message: `${initiator.firstname} ${initiator.lastname} invited you to join: "${experience.title}"`,
                 type: 'invite_sent',
-                link: `/experience/${expId}?groupBookingId=${groupBooking._id}`,
+                link: `/experiences/${expId}?groupBookingId=${groupBooking._id}`,
                 metadata: { experienceId: expId, groupBookingId: groupBooking._id }
             });
             if (io) io.to(friend._id.toString()).emit('new_notification', notification);
@@ -354,7 +354,7 @@ export class GroupBookingService {
         if (groupBookingId && mongoose.Types.ObjectId.isValid(groupBookingId)) {
             groupBooking = await this.groupBookingModel.findOne({
                 _id: groupBookingId,
-                $or: [{ experience: experienceId }, { post: experienceId }],
+                experience: experienceId,
                 status: { $in: ['planning', 'confirmed'] }
             })
             .populate('initiator', 'firstname lastname avatar')
@@ -382,7 +382,7 @@ export class GroupBookingService {
         // 2. Fallback: Initiator
         if (!groupBooking && currentUserId) {
             groupBooking = await this.groupBookingModel.findOne({
-                $or: [{ experience: experienceId }, { post: experienceId }],
+                experience: experienceId,
                 initiator: currentUserId,
                 status: 'planning'
             })
@@ -393,7 +393,7 @@ export class GroupBookingService {
         // 3. Fallback: Invited Participants
         if (!groupBooking && currentUserId) {
             groupBooking = await this.groupBookingModel.findOne({
-                $or: [{ experience: experienceId }, { post: experienceId }],
+                experience: experienceId,
                 'invitedPeople.user': currentUserId,
                 status: 'planning'
             })
@@ -487,3 +487,9 @@ export class GroupBookingService {
 
 export const groupBookingService = GroupBookingService.getInstance();
 export default GroupBookingService;
+
+// CommonJS compatibility
+module.exports = groupBookingService;
+module.exports.default = GroupBookingService;
+module.exports.GroupBookingService = GroupBookingService;
+module.exports.groupBookingService = groupBookingService;

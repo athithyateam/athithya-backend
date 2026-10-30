@@ -52,25 +52,25 @@ export async function dispatchNotification(
 export { renderBrandedEmail } from "../emailService";
 
 export function calculateBookingPricing(
-    post: any,
+    experience: any,
     numberOfPeople: number,
     effectivePeople: number,
     useWallet: boolean,
     userWalletBalance: number = 0
 ): PricingResult {
-    const rawBase = Number(post.price?.perPerson ? (post.price.perPerson * numberOfPeople) : (post.price?.amount || post.price?.total || 0));
+    const rawBase = Number(experience.price?.perPerson ? (experience.price.perPerson * numberOfPeople) : (experience.price?.amount || experience.price?.total || 0));
     const baseAmount = isNaN(rawBase) ? 0 : Math.max(0, rawBase);
 
-    const unitPrice = Number(post.price?.perPerson || post.price?.amount || post.price?.total || 0);
+    const unitPrice = Number(experience.price?.perPerson || experience.price?.amount || experience.price?.total || 0);
     const feeRate = getPlatformFeeRate(unitPrice);
     const rawFee = unitPrice * feeRate;
     const feePerPerson = rawFee < 1 ? Number(rawFee.toFixed(2)) : Math.round(rawFee);
-    const platformFee = post.price?.perPerson ? (feePerPerson * numberOfPeople) : feePerPerson;
+    const platformFee = experience.price?.perPerson ? (feePerPerson * numberOfPeople) : feePerPerson;
 
     let discountAmount = 0;
     let discountPercentage = 0;
-    if (post.discounts?.length) {
-        const sorted = [...post.discounts].sort((a: any, b: any) => b.threshold - a.threshold);
+    if (experience.discounts?.length) {
+        const sorted = [...experience.discounts].sort((a: any, b: any) => b.threshold - a.threshold);
         const applicable = sorted.find((d: any) => effectivePeople >= d.threshold);
         if (applicable) {
             discountPercentage = applicable.percentage;
@@ -127,14 +127,47 @@ export class BookingCreationService {
     private static instance: BookingCreationService | null = null;
     private static instanceKey = Symbol("BookingCreationServiceKey");
 
-    constructor(instanceKey: symbol) {
+    private bookingModel: any;
+    private experienceModel: any;
+    private userModel: any;
+    private groupBookingModel: any;
+    private hostDetailsModel: any;
+
+    constructor(
+        instanceKey: symbol,
+        bookingModel: any = Booking,
+        experienceModel: any = Experience,
+        userModel: any = User,
+        groupBookingModel: any = GroupBooking,
+        hostDetailsModel: any = HostDetails
+    ) {
         if (instanceKey !== BookingCreationService.instanceKey) {
             throw new Error("Please use BookingCreationService.getInstance()");
         }
+        this.bookingModel = bookingModel;
+        this.experienceModel = experienceModel;
+        this.userModel = userModel;
+        this.groupBookingModel = groupBookingModel;
+        this.hostDetailsModel = hostDetailsModel;
     }
 
-    public static getInstance(): BookingCreationService {
-        if (!this.instance) this.instance = new BookingCreationService(this.instanceKey);
+    public static getInstance(
+        bookingModel?: any,
+        experienceModel?: any,
+        userModel?: any,
+        groupBookingModel?: any,
+        hostDetailsModel?: any
+    ): BookingCreationService {
+        if (!this.instance) {
+            this.instance = new BookingCreationService(
+                this.instanceKey,
+                bookingModel || Booking,
+                experienceModel || Experience,
+                userModel || User,
+                groupBookingModel || GroupBooking,
+                hostDetailsModel || HostDetails
+            );
+        }
         return this.instance;
     }
 
@@ -145,8 +178,8 @@ export class BookingCreationService {
         if (!parentBookingId && !groupBookingId) return { isInviteBooking, effectivePeople };
 
         let group: any = null;
-        if (groupBookingId && mongoose.Types.ObjectId.isValid(groupBookingId)) group = await GroupBooking.findById(groupBookingId);
-        else if (parentBookingId && mongoose.Types.ObjectId.isValid(parentBookingId)) group = await Booking.findById(parentBookingId);
+        if (groupBookingId && mongoose.Types.ObjectId.isValid(groupBookingId)) group = await this.groupBookingModel.findById(groupBookingId);
+        else if (parentBookingId && mongoose.Types.ObjectId.isValid(parentBookingId)) group = await this.bookingModel.findById(parentBookingId);
         if (!group) return { isInviteBooking, effectivePeople };
 
         const initiatorId = group.initiator || group.guest;
@@ -197,27 +230,27 @@ export class BookingCreationService {
             throw err;
         }
 
-        const experience = await Experience.findById(experienceId).populate("user");
+        const experience = await this.experienceModel.findById(experienceId).populate("user");
         if (!experience) { const err: any = new Error("Experience not found"); err.statusCode = 404; throw err; }
         if (experience.status !== "active" && experience.status !== "pending") {
-            const err: any = new Error("This trip is not available for booking");
+            const err: any = new Error("This experience is not available for booking");
             err.statusCode = 400;
             throw err;
         }
 
         const hostId = experience.user?._id || experience.user;
         if (!hostId) { const err: any = new Error("This experience has no valid host assigned"); err.statusCode = 400; throw err; }
-        if (String(hostId) === String(userId)) { const err: any = new Error("You cannot book your own trip"); err.statusCode = 400; throw err; }
+        if (String(hostId) === String(userId)) { const err: any = new Error("You cannot book your own experience"); err.statusCode = 400; throw err; }
         if (userRole === "host") { const err: any = new Error("Hosts cannot engage with another host's experience. Only guests can."); err.statusCode = 400; throw err; }
 
         let validInvited: any[] = [];
         if (Array.isArray(invitedUserIds) && invitedUserIds.length > 0) {
-            const users = await User.find({ _id: { $in: invitedUserIds }, role: { $ne: "host" } });
-            validInvited = users.map(u => u._id);
+            const users = await this.userModel.find({ _id: { $in: invitedUserIds }, role: { $ne: "host" } });
+            validInvited = users.map((u: any) => u._id);
         }
 
         const { isInviteBooking, effectivePeople } = await this.resolveGroupContext(userId, peopleCount, parentBookingId, targetGroupBookingId);
-        const user = await User.findById(userId);
+        const user = await this.userModel.findById(userId);
         const useWallet = data.useWallet === true || data.useWallet === "true";
         const pricing = calculateBookingPricing(experience, peopleCount, effectivePeople, useWallet, user?.walletBalance || 0);
 
@@ -228,7 +261,7 @@ export class BookingCreationService {
 
         const dates = parseBookingDates(startDate, selectedTime, endDate, experience.duration);
 
-        const booking = new Booking({
+        const booking = new this.bookingModel({
             guest: userId,
             host: hostId,
             experience: experienceId,
@@ -274,7 +307,7 @@ export class BookingCreationService {
             throw err;
         }
 
-        const booking = await Booking.findById(bookingId).populate("post").populate("guest").populate("host");
+        const booking = await this.bookingModel.findById(bookingId).populate("experience").populate("guest").populate("host");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.orderId !== razorpay_order_id) { const err: any = new Error("Payment signature order ID mismatch"); err.statusCode = 400; throw err; }
         if (booking.guest._id.toString() !== userId.toString()) { const err: any = new Error("Unauthorized payment verification"); err.statusCode = 403; throw err; }
@@ -296,7 +329,7 @@ export class BookingCreationService {
 
         if (booking.walletAmountUsed > 0) {
             try {
-                const guestUser = await User.findById(guestId);
+                const guestUser = await this.userModel.findById(guestId);
                 if (guestUser) {
                     guestUser.walletBalance = Math.max(0, (guestUser.walletBalance || 0) - booking.walletAmountUsed);
                     await guestUser.save();
@@ -307,12 +340,12 @@ export class BookingCreationService {
         const expId = booking.experience;
         if (expId) {
             const expDocId = expId._id || expId;
-            Experience.findByIdAndUpdate(expDocId, { $inc: { bookingCount: 1 } }).catch(() => {});
+            this.experienceModel.findByIdAndUpdate(expDocId, { $inc: { bookingCount: 1 } }).catch(() => {});
         }
 
         if (hostId) {
             try {
-                const hostDoc = await HostDetails.findOneAndUpdate(
+                const hostDoc = await this.hostDetailsModel.findOneAndUpdate(
                     { user: hostId },
                     { $inc: { "verifyBadge.successfulBookingsCount": 1 } },
                     { new: true, upsert: false }
@@ -321,7 +354,7 @@ export class BookingCreationService {
                     const reqCount = hostDoc.verifyBadge?.requiredBookings !== undefined ? hostDoc.verifyBadge.requiredBookings : 1;
                     const successCount = hostDoc.verifyBadge?.successfulBookingsCount || 0;
                     if (successCount >= reqCount && !hostDoc.verifyBadge?.enabled) {
-                        await HostDetails.updateOne({ user: hostId }, { $set: { "verifyBadge.enabled": true } });
+                        await this.hostDetailsModel.updateOne({ user: hostId }, { $set: { "verifyBadge.enabled": true } });
                     }
                 }
             } catch (hErr) { console.error("Host badge update error:", hErr); }
@@ -330,8 +363,8 @@ export class BookingCreationService {
         try { chatService.sendHostBookingWelcome(booking).catch(() => {}); } catch (dmErr) {}
 
         try {
-            const guestUser = await User.findById(guestId, "firstname lastname email");
-            const hostUser = await User.findById(hostId, "firstname lastname email");
+            const guestUser = await this.userModel.findById(guestId, "firstname lastname email");
+            const hostUser = await this.userModel.findById(hostId, "firstname lastname email");
             const guestName = `${guestUser?.firstname || ""} ${guestUser?.lastname || ""}`.trim() || "Traveler";
             const hostName = `${hostUser?.firstname || ""} ${hostUser?.lastname || ""}`.trim() || "Host";
             const title = booking.experienceTitle || "Athithya Experience";
@@ -352,14 +385,14 @@ export class BookingCreationService {
         } catch (mailErr) { console.error("Booking email dispatch error:", mailErr); }
 
         if (booking.parentBookingId) {
-            Booking.findByIdAndUpdate(booking.parentBookingId, { $push: { joinedUsers: { user: guestId, booking: booking._id } } }).catch(() => {});
+            this.bookingModel.findByIdAndUpdate(booking.parentBookingId, { $push: { joinedUsers: { user: guestId, booking: booking._id } } }).catch(() => {});
         }
 
         let groupBookingObj: any = null;
         try {
             const groupBookingTargetId = booking.groupBookingId;
             if (groupBookingTargetId) {
-                const groupBooking = await GroupBooking.findById(groupBookingTargetId);
+                const groupBooking = await this.groupBookingModel.findById(groupBookingTargetId);
                 const isInitiator = String(groupBooking?.initiator || "").trim() === String(guestId).trim();
                 const updateData: any = {};
                 const options: any = { new: true };
@@ -376,11 +409,11 @@ export class BookingCreationService {
                 }
                 if (!groupBooking?.bookingId || isInitiator) updateData.bookingId = booking._id;
 
-                groupBookingObj = await GroupBooking.findByIdAndUpdate(groupBookingTargetId, { $set: updateData }, options).populate("initiator", "firstname lastname avatar");
+                groupBookingObj = await this.groupBookingModel.findByIdAndUpdate(groupBookingTargetId, { $set: updateData }, options).populate("initiator", "firstname lastname avatar");
 
                 const initiatorId = groupBookingObj?.initiator?._id || groupBookingObj?.initiator;
                 if (initiatorId && String(initiatorId).trim() !== String(guestId).trim()) {
-                    const guestUser = await User.findById(guestId, "firstname lastname");
+                    const guestUser = await this.userModel.findById(guestId, "firstname lastname");
                     const name = guestUser ? `${guestUser.firstname} ${guestUser.lastname}` : "A traveler";
                     await notificationService.sendNotification({
                         recipient: initiatorId,
@@ -408,7 +441,7 @@ export class BookingCreationService {
                 const expTargetId = booking.experience?._id || booking.experience;
                 const expTitle = booking.experienceTitle;
 
-                groupBookingObj = new GroupBooking({
+                groupBookingObj = new this.groupBookingModel({
                     initiator: guestId,
                     experience: expTargetId,
                     experienceTitle: expTitle,
@@ -440,3 +473,14 @@ export class BookingCreationService {
 }
 
 export const bookingCreationService = BookingCreationService.getInstance();
+export default BookingCreationService;
+
+// CommonJS compatibility
+module.exports = bookingCreationService;
+module.exports.default = BookingCreationService;
+module.exports.BookingCreationService = BookingCreationService;
+module.exports.bookingCreationService = bookingCreationService;
+module.exports.calculateBookingPricing = calculateBookingPricing;
+module.exports.parseBookingDates = parseBookingDates;
+module.exports.dispatchNotification = dispatchNotification;
+module.exports.renderBrandedEmail = renderBrandedEmail;

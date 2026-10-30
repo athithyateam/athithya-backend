@@ -1,5 +1,6 @@
-const { Experience, Booking, Notification, HostAuditLog, User, SavedExperience } = require("../../db/mongoose");
+const { Experience, Notification, HostAuditLog, User, SavedExperience } = require("../../db/mongoose");
 const { reviewService } = require("../../services/reviewService");
+const { bookingService } = require("../../services/bookingService");
 const { deleteFile } = require("../../services/storageService");
 const { sendHtmlEmail } = require("../../services/emailService");
 const { notificationService } = require("../../services/notificationService");
@@ -202,10 +203,7 @@ exports.updateExperienceStatus = async (req, res) => {
                         await deleteFile(asset.public_id);
                     }
                 }
-                await Booking.updateMany(
-                    { experience: experience._id, status: { $in: ['pending', 'accepted', 'in_progress', 'cancel_requested'] } },
-                    { $set: { status: 'cancelled' } }
-                );
+                await bookingService.cancelBookingsForExperience(experience._id);
 
                 // ── 3. Clean bookmarks and reviews, then delete experience ──
                 await SavedExperience.deleteMany({ experience: experience._id });
@@ -453,10 +451,7 @@ exports.deleteExperience = async (req, res) => {
             }
         }
 
-        await Booking.updateMany(
-            { experience: req.params.id, status: { $in: ['pending', 'accepted', 'in_progress', 'cancel_requested'] } },
-            { $set: { status: 'cancelled' } }
-        );
+        await bookingService.cancelBookingsForExperience(req.params.id);
 
         await HostAuditLog.deleteMany({
             type: "experience_delete",

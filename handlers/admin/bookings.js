@@ -1,12 +1,10 @@
-const { Booking } = require("../../db/mongoose");
+const { Booking, User, Experience } = require("../../db/mongoose");
 
 exports.getAllBookings = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 50;
         const search = req.query.search || "";
-        
-        const { User, Experience } = require("../../db/mongoose");
         let query = { isInviteBooking: { $ne: true } };
 
         if (search) {
@@ -72,7 +70,6 @@ exports.updateBooking = async (req, res) => {
             .populate("guest", "firstname lastname avatar email")
             .populate("host", "firstname lastname avatar email")
             .populate("experience", "title photos")
-            .populate("post", "title photos")
             .populate({
                 path: "parentBookingId",
                 populate: { path: "guest", select: "firstname lastname email" }

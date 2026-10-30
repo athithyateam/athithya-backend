@@ -59,6 +59,7 @@ export class BookingService {
         this.verifyCompletionOTP = this.verifyCompletionOTP.bind(this);
         this.acceptOrphanedBooking = this.acceptOrphanedBooking.bind(this);
         this.rejectOrphanedBooking = this.rejectOrphanedBooking.bind(this);
+        this.cancelBookingsForExperience = this.cancelBookingsForExperience.bind(this);
     }
 
     public static getInstance(
@@ -139,6 +140,11 @@ export class BookingService {
     public async rejectOrphanedBooking(bookingId: string, hostId: string): Promise<any> {
         return this.actionService.rejectOrphanedBooking(bookingId, hostId);
     }
+
+    // --- Experience Cleanup Delegation ---
+    public async cancelBookingsForExperience(experienceId: string): Promise<number> {
+        return this.actionService.cancelBookingsForExperience(experienceId);
+    }
 }
 
 export const bookingService = BookingService.getInstance();
@@ -161,6 +167,7 @@ export const sendCompletionOTP = bookingService.sendCompletionOTP;
 export const verifyCompletionOTP = bookingService.verifyCompletionOTP;
 export const acceptOrphanedBooking = bookingService.acceptOrphanedBooking;
 export const rejectOrphanedBooking = bookingService.rejectOrphanedBooking;
+export const cancelBookingsForExperience = bookingService.cancelBookingsForExperience;
 
 // CommonJS compatibility
 module.exports = bookingService;
@@ -173,3 +180,4 @@ module.exports.calculateBookingPricing = calculateBookingPricing;
 module.exports.parseBookingDates = parseBookingDates;
 module.exports.dispatchNotification = dispatchNotification;
 module.exports.renderBrandedEmail = renderBrandedEmail;
+module.exports.cancelBookingsForExperience = cancelBookingsForExperience;

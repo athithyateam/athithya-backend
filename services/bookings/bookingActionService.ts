@@ -13,14 +13,32 @@ export class BookingActionService {
     private static instance: BookingActionService | null = null;
     private static instanceKey = Symbol("BookingActionServiceKey");
 
-    constructor(instanceKey: symbol) {
+    private bookingModel: any;
+    private userModel: any;
+
+    constructor(
+        instanceKey: symbol,
+        bookingModel: any = Booking,
+        userModel: any = User
+    ) {
         if (instanceKey !== BookingActionService.instanceKey) {
             throw new Error("Please use BookingActionService.getInstance()");
         }
+        this.bookingModel = bookingModel;
+        this.userModel = userModel;
     }
 
-    public static getInstance(): BookingActionService {
-        if (!this.instance) this.instance = new BookingActionService(this.instanceKey);
+    public static getInstance(
+        bookingModel?: any,
+        userModel?: any
+    ): BookingActionService {
+        if (!this.instance) {
+            this.instance = new BookingActionService(
+                this.instanceKey,
+                bookingModel || Booking,
+                userModel || User
+            );
+        }
         return this.instance;
     }
 
@@ -36,11 +54,10 @@ export class BookingActionService {
         };
         if (status) query.status = status;
 
-        const total = await Booking.countDocuments(query);
-        const rawBookedData = await Booking.find(query)
+        const total = await this.bookingModel.countDocuments(query);
+        const rawBookedData = await this.bookingModel.find(query)
             .populate("guest", "firstname lastname avatar")
             .populate("experience", "title photos location duration price")
-            .populate("post", "title photos location duration price")
             .populate({ path: "joinedUsers.booking", select: "totalAmount status isInviteBooking" })
             .sort({ createdAt: -1 })
             .skip((pageNum - 1) * limitNum)
@@ -68,9 +85,9 @@ export class BookingActionService {
             $or: [{ parentBookingId: { $exists: false } }, { parentBookingId: null }]
         });
         const [pendingCount, acceptedCount, declinedCount] = await Promise.all([
-            Booking.countDocuments(countQuery("pending")),
-            Booking.countDocuments(countQuery("accepted")),
-            Booking.countDocuments(countQuery("declined"))
+            this.bookingModel.countDocuments(countQuery("pending")),
+            this.bookingModel.countDocuments(countQuery("accepted")),
+            this.bookingModel.countDocuments(countQuery("declined"))
         ]);
 
         return {
@@ -93,11 +110,10 @@ export class BookingActionService {
         const query: any = { guest: guestId };
         if (status) query.status = status;
 
-        const total = await Booking.countDocuments(query);
-        const bookings = await Booking.find(query)
+        const total = await this.bookingModel.countDocuments(query);
+        const bookings = await this.bookingModel.find(query)
             .populate("host", "firstname lastname email avatar")
             .populate("experience", "title photos location duration price")
-            .populate("post", "title photos location duration price")
             .populate("invitedUsers", "firstname lastname avatar")
             .populate({ path: "joinedUsers.user", select: "firstname lastname avatar" })
             .populate({ path: "joinedUsers.booking", select: "startDate endDate totalAmount" })
@@ -112,11 +128,10 @@ export class BookingActionService {
     }
 
     public async getBookingDetails(bookingId: string, userId: string): Promise<any> {
-        const booking: any = await Booking.findById(bookingId)
+        const booking: any = await this.bookingModel.findById(bookingId)
             .populate("guest", "firstname lastname email avatar")
             .populate("host", "firstname lastname email avatar")
-            .populate("experience", "title photos location price")
-            .populate("post", "title photos location price");
+            .populate("experience", "title photos location price");
 
         if (!booking) {
             const err: any = new Error("Booking not found");
@@ -142,7 +157,7 @@ export class BookingActionService {
     }
 
     public async acceptBooking(bookingId: string, hostId: string, hostResponse: string = ""): Promise<any> {
-        const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("post", "title");
+        const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email").populate("experience", "title");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
         if (booking.status !== "pending") { const err: any = new Error(`Cannot accept ${booking.status} booking`); err.statusCode = 400; throw err; }
@@ -183,7 +198,7 @@ export class BookingActionService {
     }
 
     public async declineBooking(bookingId: string, hostId: string, hostResponse: string = ""): Promise<any> {
-        const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("experience", "title");
+        const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email").populate("experience", "title");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
         if (booking.status !== "pending") { const err: any = new Error(`Cannot decline ${booking.status} booking`); err.statusCode = 400; throw err; }
@@ -224,7 +239,7 @@ export class BookingActionService {
     }
 
     public async requestCancellation(bookingId: string, guestId: string, reason: string = "No reason provided"): Promise<any> {
-        const booking: any = await Booking.findById(bookingId);
+        const booking: any = await this.bookingModel.findById(bookingId);
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.guest.toString() !== guestId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
 
@@ -245,7 +260,7 @@ export class BookingActionService {
     }
 
     public async approveCancellation(bookingId: string, hostId: string): Promise<any> {
-        const booking: any = await Booking.findById(bookingId);
+        const booking: any = await this.bookingModel.findById(bookingId);
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
 
@@ -266,7 +281,7 @@ export class BookingActionService {
     }
 
     public async sendStartOTP(bookingId: string, hostId: string): Promise<any> {
-        const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email");
+        const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
         if (booking.status !== "accepted") { const err: any = new Error("Booking must be accepted to start the journey"); err.statusCode = 400; throw err; }
@@ -285,7 +300,7 @@ export class BookingActionService {
     }
 
     public async verifyStartOTP(bookingId: string, hostId: string, otp: string): Promise<any> {
-        const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("host", "firstname lastname email");
+        const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email").populate("host", "firstname lastname email");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host._id.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
         if (booking.status !== "accepted") { const err: any = new Error("Booking must be accepted to verify experience start"); err.statusCode = 400; throw err; }
@@ -317,7 +332,7 @@ export class BookingActionService {
     }
 
     public async sendCompletionOTP(bookingId: string, hostId: string): Promise<any> {
-        const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email");
+        const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
         if (booking.status !== "in_progress") { const err: any = new Error("Experience journey must be in progress to complete it"); err.statusCode = 400; throw err; }
@@ -336,7 +351,7 @@ export class BookingActionService {
     }
 
     public async verifyCompletionOTP(bookingId: string, hostId: string, otp: string): Promise<any> {
-        const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("host", "firstname lastname email");
+        const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email").populate("host", "firstname lastname email");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host._id.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
         if (booking.status !== "in_progress") { const err: any = new Error("Experience journey must be active to verify completion"); err.statusCode = 400; throw err; }
@@ -369,7 +384,7 @@ export class BookingActionService {
             sender: hostId,
             title: "Experience Completed! Share your review",
             message: `Thank you for choosing Athithya! Please share your experience and review "${expTitle}".`,
-            type: "booking_accepted",
+            type: "booking_completed",
             link: `/experiences/${expTargetId}`
         });
 
@@ -388,7 +403,7 @@ export class BookingActionService {
     }
 
     public async acceptOrphanedBooking(bookingId: string, hostId: string): Promise<any> {
-        const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("experience", "title").populate("post", "title");
+        const booking: any = await this.bookingModel.findById(bookingId).populate("guest", "firstname lastname email").populate("experience", "title");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
 
@@ -418,7 +433,7 @@ export class BookingActionService {
     }
 
     public async rejectOrphanedBooking(bookingId: string, hostId: string): Promise<any> {
-        const booking: any = await Booking.findById(bookingId).populate("guest").populate("experience", "title");
+        const booking: any = await this.bookingModel.findById(bookingId).populate("guest").populate("experience", "title");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
 
@@ -427,7 +442,7 @@ export class BookingActionService {
         await booking.save();
 
         const refundAmount = Math.max(0, booking.totalAmount - booking.platformFee);
-        const guestUser = await User.findById(booking.guest._id);
+        const guestUser = await this.userModel.findById(booking.guest._id);
         if (guestUser) {
             guestUser.walletBalance = (guestUser.walletBalance || 0) + refundAmount;
             await guestUser.save();
@@ -454,6 +469,24 @@ export class BookingActionService {
 
         return { refundAmount };
     }
+
+    /**
+     * Cancel all active or pending bookings for an experience (e.g. when experience is deleted)
+     */
+    public async cancelBookingsForExperience(experienceId: string): Promise<number> {
+        const result = await this.bookingModel.updateMany(
+            { experience: experienceId, status: { $in: ["pending", "accepted", "in_progress", "cancel_requested"] } },
+            { $set: { status: "cancelled" } }
+        );
+        return result?.modifiedCount || 0;
+    }
 }
 
 export const bookingActionService = BookingActionService.getInstance();
+export default BookingActionService;
+
+// CommonJS compatibility
+module.exports = bookingActionService;
+module.exports.default = BookingActionService;
+module.exports.BookingActionService = BookingActionService;
+module.exports.bookingActionService = bookingActionService;

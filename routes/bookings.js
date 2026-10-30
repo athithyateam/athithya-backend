@@ -17,12 +17,6 @@ const {
     rejectOrphanedBooking
 } = require("../handlers/bookings/bookingActions");
 
-// Helper middleware
-const setMyUser = (req, res, next) => {
-    req.params.userId = req.user.userId;
-    next();
-};
-
 bookingRouter.post("/", checkAuth, createBooking);
 bookingRouter.post("/verify", checkAuth, verifyPayment);
 bookingRouter.get("/host/requests", checkAuth, getHostRequests);
