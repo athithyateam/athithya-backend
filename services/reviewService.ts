@@ -14,11 +14,19 @@ export interface ReviewData {
     comment?: string;
 }
 
-export interface HostReviewsOptions {
-    rating?: number | string;
+export interface ReviewPaginationOptions {
     page?: number | string;
     limit?: number | string;
+    sort?: any;
+    populateReviewer?: boolean;
+    populateHost?: boolean;
+    populateExperience?: boolean;
+}
+
+export interface HostReviewsOptions extends ReviewPaginationOptions {
+    rating?: number | string;
     includeRatingOnly?: string | boolean;
+    currentUserId?: string;
 }
 
 export interface ReviewStats {
@@ -43,7 +51,8 @@ export interface HostReviewsResult {
     averageRating: number;
     totalRatings: number;
     totalReviews: number;
-    ratingDistribution: Record<number, number>;
+    ratingDistribution: Record<1 | 2 | 3 | 4 | 5, number>;
+    reviewStats: ReviewStats;
     reviews: any[];
 }
 
@@ -57,6 +66,9 @@ export interface EligibilityResult {
     isExperience?: boolean;
     hostId?: string;
 }
+
+const POPULATE_USER = "firstname lastname email role avatar";
+const POPULATE_EXPERIENCE = "title photos location price";
 
 export class ReviewService {
     private static instance: ReviewService | null = null;
@@ -101,6 +113,175 @@ export class ReviewService {
         return this.instance;
     }
 
+    // ==========================================
+    // DRY VALIDATION & AGGREGATION HELPERS
+    // ==========================================
+
+    private validateObjectId(id: any, name: string): mongoose.Types.ObjectId {
+        if (!id || typeof id !== "string" || id.trim() === "") {
+            const error: any = new Error(`${name} is required`);
+            error.statusCode = 400;
+            throw error;
+        }
+        const cleanId = id.trim();
+        if (!mongoose.Types.ObjectId.isValid(cleanId)) {
+            const error: any = new Error(`Invalid ${name.charAt(0).toLowerCase() + name.slice(1)} format`);
+            error.statusCode = 400;
+            throw error;
+        }
+        return new mongoose.Types.ObjectId(cleanId);
+    }
+
+    private validateRating(rating: any): number {
+        if (rating === undefined || rating === null) {
+            const error: any = new Error("Rating is required");
+            error.statusCode = 400;
+            throw error;
+        }
+        const ratingNum = Number(rating);
+        if (isNaN(ratingNum) || !Number.isFinite(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+            const error: any = new Error("Rating must be a number between 1 and 5");
+            error.statusCode = 400;
+            throw error;
+        }
+        return Math.round(ratingNum);
+    }
+
+    private validateComment(comment: any): string {
+        if (comment === undefined || comment === null) return "";
+        const trimmed = String(comment).trim();
+        if (trimmed.length > 1000) {
+            const error: any = new Error("Comment cannot exceed 1000 characters");
+            error.statusCode = 400;
+            throw error;
+        }
+        return trimmed;
+    }
+
+    /**
+     * Centralized rating statistics aggregation pipeline.
+     * Computes total ratings, written review count, average rating, and 1-5 distribution in a single pass.
+     */
+    private async aggregateRatingStats(matchFilter: any): Promise<{
+        totalRatings: number;
+        totalReviews: number;
+        averageRating: number;
+        ratingDistribution: Record<1 | 2 | 3 | 4 | 5, number>;
+    }> {
+        const statsResult = await this.reviewModel.aggregate([
+            { $match: matchFilter },
+            {
+                $group: {
+                    _id: "$rating",
+                    count: { $sum: 1 },
+                    writtenCount: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $ne: ["$comment", null] },
+                                        { $ne: ["$comment", ""] }
+                                    ]
+                                },
+                                1,
+                                0
+                            ]
+                        }
+                    }
+                }
+            }
+        ]);
+
+        const ratingDistribution: Record<1 | 2 | 3 | 4 | 5, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+        let totalRatings = 0;
+        let totalReviews = 0;
+        let ratingSum = 0;
+
+        for (const item of statsResult || []) {
+            const star = item._id;
+            if (star >= 1 && star <= 5) {
+                ratingDistribution[star as 1 | 2 | 3 | 4 | 5] = item.count;
+                totalRatings += item.count;
+                totalReviews += item.writtenCount;
+                ratingSum += star * item.count;
+            }
+        }
+
+        const averageRating = totalRatings > 0 ? Number((ratingSum / totalRatings).toFixed(2)) : 0;
+        return { totalRatings, totalReviews, averageRating, ratingDistribution };
+    }
+
+    /**
+     * Build base match query for a host, covering reviews addressed directly to the host
+     * or associated with any experiences owned by that host.
+     */
+    private async getHostBaseMatch(hostObjectId: mongoose.Types.ObjectId): Promise<any> {
+        const hostExperiences = await this.experienceModel.find({ user: hostObjectId }).select("_id").lean();
+        const hostExpIds = (hostExperiences || []).map((e: any) => e._id);
+        return hostExpIds.length > 0
+            ? { $or: [{ host: hostObjectId }, { experience: { $in: hostExpIds } }] }
+            : { host: hostObjectId };
+    }
+
+    // ==========================================
+    // CORE QUERY & DOMAIN OPERATIONS
+    // ==========================================
+
+    /**
+     * Unified paginated query engine for review retrieval with population and sorting.
+     */
+    public async getReviews(
+        filter: any = {},
+        options: ReviewPaginationOptions = {}
+    ): Promise<{
+        count: number;
+        total: number;
+        page: number;
+        totalPages: number;
+        reviews: any[];
+    }> {
+        const pageNum = Math.max(1, parseInt(String(options.page)) || 1);
+        const limitNum = options.limit ? Math.max(1, Math.min(parseInt(String(options.limit)) || 20, 100)) : 20;
+        const skip = (pageNum - 1) * limitNum;
+        const sort = options.sort || { createdAt: -1 };
+
+        let query = this.reviewModel.find(filter);
+
+        if (options.populateReviewer !== false && typeof query?.populate === "function") {
+            query = query.populate("reviewer", POPULATE_USER);
+        }
+        if (options.populateHost !== false && typeof query?.populate === "function") {
+            query = query.populate("host", POPULATE_USER);
+        }
+        if (options.populateExperience !== false && typeof query?.populate === "function") {
+            query = query.populate("experience", POPULATE_EXPERIENCE);
+        }
+
+        if (typeof query?.sort === "function") {
+            query = query.sort(sort);
+        }
+        if (typeof query?.skip === "function") {
+            query = query.skip(skip);
+        }
+        if (typeof query?.limit === "function") {
+            query = query.limit(limitNum);
+        }
+
+        const [rawReviews, total] = await Promise.all([
+            typeof query?.lean === "function" ? query.lean() : query,
+            this.reviewModel.countDocuments(filter)
+        ]);
+
+        const reviews = Array.isArray(rawReviews) ? rawReviews : [];
+        return {
+            count: reviews.length,
+            total: total || 0,
+            page: pageNum,
+            totalPages: Math.ceil((total || 0) / limitNum) || 1,
+            reviews
+        };
+    }
+
     /**
      * Recalculate average rating and rating count for an experience using MongoDB aggregation
      */
@@ -108,13 +289,9 @@ export class ReviewService {
         if (!experienceId || !mongoose.Types.ObjectId.isValid(experienceId)) return { average: 0, count: 0 };
         try {
             const expObjectId = new mongoose.Types.ObjectId(experienceId);
-            const stats = await this.reviewModel.aggregate([
-                { $match: { experience: expObjectId } },
-                { $group: { _id: null, count: { $sum: 1 }, average: { $avg: "$rating" } } }
-            ]);
-
-            const count = stats.length > 0 ? stats[0].count : 0;
-            const average = stats.length > 0 ? Math.round(stats[0].average * 10) / 10 : 0;
+            const stats = await this.aggregateRatingStats({ experience: expObjectId });
+            const average = Math.round(stats.averageRating * 10) / 10;
+            const count = stats.totalRatings;
 
             await this.experienceModel.findByIdAndUpdate(expObjectId, {
                 "rating.average": average,
@@ -144,21 +321,7 @@ export class ReviewService {
             };
         }
 
-        if (!experienceId || typeof experienceId !== "string" || experienceId.trim() === "") {
-            const error: any = new Error("Experience ID is required");
-            error.statusCode = 400;
-            throw error;
-        }
-
-        const cleanExpId = experienceId.trim();
-        if (!mongoose.Types.ObjectId.isValid(cleanExpId)) {
-            const error: any = new Error("Invalid experience ID format");
-            error.statusCode = 400;
-            throw error;
-        }
-
-        const expObjectId = new mongoose.Types.ObjectId(cleanExpId);
-
+        const expObjectId = this.validateObjectId(experienceId, "Experience ID");
         const expQuery = this.experienceModel.findById(expObjectId);
         const experience = await (typeof expQuery?.select === "function" ? expQuery.select("_id user") : expQuery);
         if (!experience) {
@@ -231,16 +394,9 @@ export class ReviewService {
 
         let validExperienceId: string | null = null;
         if (experienceId !== undefined && experienceId !== null && String(experienceId).trim() !== "") {
-            const trimmedExpId = String(experienceId).trim();
-            if (!mongoose.Types.ObjectId.isValid(trimmedExpId)) {
-                const error: any = new Error("Invalid experience ID format");
-                error.statusCode = 400;
-                throw error;
-            }
-            validExperienceId = trimmedExpId;
+            validExperienceId = this.validateObjectId(experienceId, "Experience ID").toString();
         }
 
-        // If experience is specified, verify it and derive hostId if missing
         if (validExperienceId) {
             const experience = await this.experienceModel.findById(validExperienceId);
             if (!experience) {
@@ -279,42 +435,19 @@ export class ReviewService {
             error.statusCode = 404;
             throw error;
         }
-
         if (host.role !== "host") {
             const error: any = new Error("Reviews can only be given to hosts");
             error.statusCode = 400;
             throw error;
         }
-
         if (reviewerId && reviewerId.toString() === hostId.toString()) {
             const error: any = new Error("You cannot review yourself");
             error.statusCode = 400;
             throw error;
         }
 
-        if (rating === undefined || rating === null) {
-            const error: any = new Error("Rating is required");
-            error.statusCode = 400;
-            throw error;
-        }
-
-        const ratingNum = Number(rating);
-        if (isNaN(ratingNum) || !Number.isFinite(ratingNum) || ratingNum < 1 || ratingNum > 5) {
-            const error: any = new Error("Rating must be a number between 1 and 5");
-            error.statusCode = 400;
-            throw error;
-        }
-        const finalRating = Math.round(ratingNum);
-
-        let finalComment = "";
-        if (comment !== undefined && comment !== null) {
-            finalComment = String(comment).trim();
-            if (finalComment.length > 1000) {
-                const error: any = new Error("Comment cannot exceed 1000 characters");
-                error.statusCode = 400;
-                throw error;
-            }
-        }
+        const finalRating = this.validateRating(rating);
+        const finalComment = this.validateComment(comment);
 
         const query: any = {
             host: hostId,
@@ -344,91 +477,48 @@ export class ReviewService {
             await this.recalculateExperienceRating(validExperienceId);
         }
 
-        const populatedReview = await this.reviewModel.findById(review._id)
-            .populate("reviewer", "firstname lastname email role avatar")
-            .populate("host", "firstname lastname email role avatar")
-            .populate("experience", "title photos location price")
-            .lean();
+        const findQuery = this.reviewModel.findById(review._id);
+        const populatedReview = typeof findQuery?.populate === "function"
+            ? await findQuery
+                .populate("reviewer", POPULATE_USER)
+                .populate("host", POPULATE_USER)
+                .populate("experience", POPULATE_EXPERIENCE)
+                .lean()
+            : review;
 
         return { review: populatedReview, isUpdate };
     }
 
     /**
-     * Get all reviews for a host, including rating breakdown and statistics
+     * Get all reviews for a host, including rating breakdown and statistics.
+     * Serves both public host review listings and profile host review statistics.
      */
     public async getHostReviews(hostId: string, options: HostReviewsOptions = {}): Promise<HostReviewsResult> {
-        if (!hostId || !mongoose.Types.ObjectId.isValid(hostId)) {
-            const error: any = new Error("Invalid host ID format");
-            error.statusCode = 400;
-            throw error;
-        }
+        const hostObjectId = this.validateObjectId(hostId, "Host ID");
+        const { rating, page = 1, limit = 20, includeRatingOnly, currentUserId } = options;
 
-        const { rating, page = 1, limit = 20, includeRatingOnly } = options;
-        const pageNum = Math.max(1, parseInt(String(page)) || 1);
-        const limitNum = Math.max(1, Math.min(parseInt(String(limit)) || 20, 100));
-        const skip = (pageNum - 1) * limitNum;
-
-        const hostObjectId = new mongoose.Types.ObjectId(hostId);
-        const hostExperiences = await this.experienceModel.find({ user: hostObjectId }).select("_id").lean();
-        const hostExpIds = hostExperiences.map((p: any) => p._id);
-
-        const baseMatch: any = hostExpIds.length > 0
-            ? { $or: [{ host: hostObjectId }, { experience: { $in: hostExpIds } }] }
-            : { host: hostObjectId };
-
+        const baseMatch = await this.getHostBaseMatch(hostObjectId);
         const filter: any = { ...baseMatch };
+
         if (rating !== undefined && rating !== null && rating !== "") {
             const rNum = Number(rating);
             if (!isNaN(rNum) && rNum >= 1 && rNum <= 5) {
-                filter.rating = rNum;
+                filter.rating = Math.round(rNum);
             }
         }
         if (includeRatingOnly === "false" || includeRatingOnly === false) {
             filter.comment = { $exists: true, $regex: /\S/ };
         }
 
-        const statsPipeline = [
-            { $match: baseMatch },
-            {
-                $group: {
-                    _id: "$rating",
-                    count: { $sum: 1 },
-                    writtenCount: {
-                        $sum: {
-                            $cond: [
-                                {
-                                    $and: [
-                                        { $ne: ["$comment", null] },
-                                        { $ne: ["$comment", ""] }
-                                    ]
-                                },
-                                1,
-                                0
-                            ]
-                        }
-                    }
-                }
-            }
-        ];
-
-        const [statsResult, filteredTotal, rawReviews] = await Promise.all([
-            this.reviewModel.aggregate(statsPipeline),
-            this.reviewModel.countDocuments(filter),
-            this.reviewModel.find(filter)
-                .populate("reviewer", "firstname lastname email role avatar")
-                .populate("experience", "title photos location price")
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limitNum)
-                .lean()
+        const [stats, paginatedResult] = await Promise.all([
+            this.aggregateRatingStats(baseMatch),
+            this.getReviews(filter, { page, limit, populateHost: false })
         ]);
-
-        const validReviews = rawReviews.filter((r: any) => r.reviewer && (r.reviewer._id || r.reviewer.id));
 
         // Deduplicate multiple entries from same reviewer on this page prioritizing written comments
         const seenReviewers = new Set<string>();
         const uniqueReviews: any[] = [];
-        for (const r of validReviews) {
+        for (const r of paginatedResult.reviews) {
             const revId = r.reviewer?._id ? r.reviewer._id.toString() : (r.reviewer?.id ? r.reviewer.id.toString() : null);
             if (!revId) continue;
             if (!seenReviewers.has(revId)) {
@@ -442,211 +532,62 @@ export class ReviewService {
             }
         }
 
-        const ratingDistribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-        let totalRatings = 0;
-        let totalReviews = 0;
-        let ratingSum = 0;
-
-        for (const item of statsResult) {
-            const star = item._id;
-            if (star >= 1 && star <= 5) {
-                ratingDistribution[star] = item.count;
-                totalRatings += item.count;
-                totalReviews += item.writtenCount;
-                ratingSum += star * item.count;
-            }
+        let currentUserRating: number | null = null;
+        if (currentUserId && mongoose.Types.ObjectId.isValid(currentUserId)) {
+            const userReview = await this.reviewModel.findOne({
+                host: hostObjectId,
+                reviewer: new mongoose.Types.ObjectId(currentUserId)
+            }).sort({ createdAt: -1 });
+            if (userReview) currentUserRating = userReview.rating;
         }
 
-        const averageRating = totalRatings > 0 ? Number((ratingSum / totalRatings).toFixed(2)) : 0;
+        const reviewStats: ReviewStats = {
+            totalRatings: stats.totalRatings,
+            totalReviews: stats.totalReviews,
+            averageRating: Number(stats.averageRating.toFixed(1)),
+            currentUserRating,
+            ratings: stats.ratingDistribution
+        };
 
         return {
             count: uniqueReviews.length,
-            total: filteredTotal,
-            page: pageNum,
-            totalPages: Math.ceil(filteredTotal / limitNum) || 1,
-            averageRating,
-            totalRatings,
-            totalReviews,
-            ratingDistribution,
+            total: paginatedResult.total,
+            page: paginatedResult.page,
+            totalPages: paginatedResult.totalPages,
+            averageRating: stats.averageRating,
+            totalRatings: stats.totalRatings,
+            totalReviews: stats.totalReviews,
+            ratingDistribution: stats.ratingDistribution,
+            reviewStats,
             reviews: uniqueReviews
         };
     }
 
     /**
-     * Calculate host review statistics, distribution, and current user rating (for host profile display)
+     * Get reviews written by a specific reviewer, with optional comment filtering and pagination.
      */
-    public async calculateHostReviewStats(hostId: string, currentUserId?: string): Promise<{
-        reviews: any[];
-        reviewStats: ReviewStats | null;
-    }> {
-        if (!hostId || !mongoose.Types.ObjectId.isValid(hostId)) {
-            return { reviews: [], reviewStats: null };
+    public async getReviewerReviews(
+        reviewerId: string,
+        options: { page?: number | string; limit?: number | string; hasComment?: boolean } = {}
+    ): Promise<{ count: number; total: number; page: number; totalPages: number; reviews: any[] }> {
+        const reviewerObjectId = this.validateObjectId(reviewerId, "Reviewer ID");
+        const filter: any = { reviewer: reviewerObjectId };
+        if (options.hasComment) {
+            filter.comment = { $exists: true, $regex: /\S/ };
         }
-
-        const hostObjectId = new mongoose.Types.ObjectId(hostId);
-        const hostExperiences = await this.experienceModel.find({ user: hostObjectId }).select("_id").lean();
-        const hostExpIds = hostExperiences.map((p: any) => p._id);
-
-        const baseMatch: any = hostExpIds.length > 0
-            ? { $or: [{ host: hostObjectId }, { experience: { $in: hostExpIds } }] }
-            : { host: hostObjectId };
-
-        const allHostReviews = await this.reviewModel.find(baseMatch)
-            .populate("reviewer", "firstname lastname avatar")
-            .populate("experience", "title")
-            .sort({ createdAt: -1 })
-            .lean();
-
-        const writtenReviews = allHostReviews.filter((r: any) => r.reviewer && r.comment && r.comment.trim() !== "");
-
-        const totalStats = await this.reviewModel.aggregate([
-            { $match: baseMatch },
-            { $group: { _id: null, average: { $avg: "$rating" }, count: { $sum: 1 } } }
-        ]);
-
-        let reviewStats: ReviewStats | null = null;
-        if (totalStats.length > 0) {
-            const avg = totalStats[0].average || 0;
-            const currentUserIdStr = currentUserId?.toString();
-            const userRatingObj = currentUserIdStr && mongoose.Types.ObjectId.isValid(currentUserIdStr)
-                ? await this.reviewModel.findOne({
-                    host: hostObjectId,
-                    reviewer: new mongoose.Types.ObjectId(currentUserIdStr)
-                }).sort({ createdAt: -1 }).lean()
-                : null;
-
-            reviewStats = {
-                totalRatings: totalStats[0].count,
-                totalReviews: writtenReviews.length,
-                averageRating: Number(avg.toFixed(1)),
-                currentUserRating: userRatingObj ? userRatingObj.rating : null,
-                ratings: {
-                    5: allHostReviews.filter((r: any) => r.rating === 5).length,
-                    4: allHostReviews.filter((r: any) => r.rating === 4).length,
-                    3: allHostReviews.filter((r: any) => r.rating === 3).length,
-                    2: allHostReviews.filter((r: any) => r.rating === 2).length,
-                    1: allHostReviews.filter((r: any) => r.rating === 1).length
-                }
-            };
-        }
-
-        return { reviews: writtenReviews, reviewStats };
+        return this.getReviews(filter, { ...options, populateReviewer: false });
     }
 
     /**
-     * Get aggregate host rating (average and count) across all host and experience reviews
+     * Get reviews for a specific experience
      */
-    public async getHostRating(hostId: string): Promise<{ average: number; count: number }> {
-        if (!hostId || !mongoose.Types.ObjectId.isValid(hostId)) return { average: 0, count: 0 };
-        const hostObjectId = new mongoose.Types.ObjectId(hostId);
-        const hostExperiences = await this.experienceModel.find({ user: hostObjectId }).select("_id").lean();
-        const hostExperienceIds = hostExperiences.map((p: any) => p._id);
-        const baseMatch: any = hostExperienceIds.length > 0
-            ? { $or: [{ host: hostObjectId }, { experience: { $in: hostExperienceIds } }] }
-            : { host: hostObjectId };
-
-        const hostStats = await this.reviewModel.aggregate([
-            { $match: baseMatch },
-            { $group: { _id: null, average: { $avg: "$rating" }, count: { $sum: 1 } } }
-        ]);
-
-        if (hostStats.length > 0) {
-            return {
-                average: Math.round(hostStats[0].average * 10) / 10,
-                count: hostStats[0].count
-            };
-        }
-        return { average: 0, count: 0 };
-    }
-
-    /**
-     * Get all reviews written by a specific reviewer
-     */
-    public async getReviewerReviews(reviewerId: string, options: { page?: number | string; limit?: number | string } = {}): Promise<any> {
-        if (!reviewerId || !mongoose.Types.ObjectId.isValid(reviewerId)) {
-            const error: any = new Error("Invalid reviewer ID format");
-            error.statusCode = 400;
-            throw error;
-        }
-
-        const pageNum = Math.max(1, parseInt(String(options.page)) || 1);
-        const limitNum = Math.max(1, Math.min(parseInt(String(options.limit)) || 20, 100));
-        const skip = (pageNum - 1) * limitNum;
-
-        const [reviews, total] = await Promise.all([
-            this.reviewModel.find({ reviewer: reviewerId })
-                .populate("host", "firstname lastname email role avatar")
-                .populate("experience", "title photos location price")
-                .sort({ createdAt: -1 })
-                .limit(limitNum)
-                .skip(skip)
-                .lean(),
-            this.reviewModel.countDocuments({ reviewer: reviewerId })
-        ]);
-
-        return {
-            count: reviews.length,
-            total,
-            page: pageNum,
-            totalPages: Math.ceil(total / limitNum) || 1,
-            reviews
-        };
-    }
-
-    /**
-     * Get reviews written by the authenticated user
-     */
-    public async getMyReviews(userId: string): Promise<any[]> {
-        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-            return [];
-        }
-        return this.reviewModel.find({ reviewer: userId })
-            .populate("host", "firstname lastname email role avatar")
-            .populate("experience", "title photos location price")
-            .sort({ createdAt: -1 })
-            .lean();
-    }
-
-    /**
-     * Get reviews received by a host user
-     */
-    public async getReceivedReviews(hostId: string, options: { rating?: number | string; page?: number | string; limit?: number | string } = {}): Promise<any> {
-        if (!hostId || !mongoose.Types.ObjectId.isValid(hostId)) {
-            const error: any = new Error("Invalid host ID format");
-            error.statusCode = 400;
-            throw error;
-        }
-
-        const filter: any = { host: hostId };
-        if (options.rating !== undefined && options.rating !== null && options.rating !== "") {
-            const rNum = Number(options.rating);
-            if (!isNaN(rNum) && rNum >= 1 && rNum <= 5) {
-                filter.rating = rNum;
-            }
-        }
-
-        const pageNum = Math.max(1, parseInt(String(options.page)) || 1);
-        const limitNum = Math.max(1, Math.min(parseInt(String(options.limit)) || 20, 100));
-        const skip = (pageNum - 1) * limitNum;
-
-        const [reviews, total] = await Promise.all([
-            this.reviewModel.find(filter)
-                .populate("reviewer", "firstname lastname email role avatar")
-                .populate("experience", "title photos location price")
-                .sort({ createdAt: -1 })
-                .limit(limitNum)
-                .skip(skip)
-                .lean(),
-            this.reviewModel.countDocuments(filter)
-        ]);
-
-        return {
-            count: reviews.length,
-            total,
-            page: pageNum,
-            totalPages: Math.ceil(total / limitNum) || 1,
-            reviews
-        };
+    public async getExperienceReviews(experienceId: string, limit?: number): Promise<any[]> {
+        if (!experienceId || !mongoose.Types.ObjectId.isValid(experienceId)) return [];
+        const result = await this.getReviews(
+            { experience: new mongoose.Types.ObjectId(experienceId) },
+            { limit: limit || 100, populateHost: false, populateExperience: false }
+        );
+        return result.reviews;
     }
 
     /**
@@ -654,38 +595,24 @@ export class ReviewService {
      */
     public async getLatestReviews(limit: number = 20): Promise<any[]> {
         const limitNum = Math.max(1, Math.min(Number(limit) || 20, 50));
-        const candidateReviews = await this.reviewModel.find({
-            comment: { $exists: true, $regex: /\S/ },
-            rating: { $gte: 1 }
-        })
-            .populate("reviewer", "firstname lastname name email role avatar")
-            .populate("host", "firstname lastname name email role avatar")
-            .populate("experience", "title photos location price")
-            .sort({ createdAt: -1 })
-            .limit(limitNum * 3)
-            .lean();
-
-        return candidateReviews
-            .filter((r: any) => r && r.comment && r.comment.trim() !== "" && r.reviewer && (r.reviewer.firstname || r.reviewer.name))
-            .slice(0, limitNum);
+        const result = await this.getReviews(
+            { comment: { $exists: true, $regex: /\S/ }, rating: { $gte: 1 } },
+            { limit: limitNum }
+        );
+        return result.reviews.filter(r => r.reviewer && (r.reviewer.firstname || r.reviewer.name));
     }
 
     /**
      * Get single review by ID
      */
     public async getReviewById(reviewId: string): Promise<any> {
-        if (!reviewId || !mongoose.Types.ObjectId.isValid(reviewId)) {
-            const error: any = new Error("Invalid review ID format");
-            error.statusCode = 400;
-            throw error;
-        }
+        const objId = this.validateObjectId(reviewId, "Review ID");
+        const query = this.reviewModel.findById(objId)
+            .populate("reviewer", POPULATE_USER)
+            .populate("host", POPULATE_USER)
+            .populate("experience", POPULATE_EXPERIENCE);
 
-        const review = await this.reviewModel.findById(reviewId)
-            .populate("reviewer", "firstname lastname email role avatar")
-            .populate("host", "firstname lastname email role avatar")
-            .populate("experience", "title photos location price")
-            .lean();
-
+        const review = await (typeof query?.lean === "function" ? query.lean() : query);
         if (!review) {
             const error: any = new Error("Review not found");
             error.statusCode = 404;
@@ -702,13 +629,8 @@ export class ReviewService {
         userId: string,
         data: { rating?: number | string; comment?: string }
     ): Promise<any> {
-        if (!reviewId || !mongoose.Types.ObjectId.isValid(reviewId)) {
-            const error: any = new Error("Invalid review ID format");
-            error.statusCode = 400;
-            throw error;
-        }
-
-        const review = await this.reviewModel.findById(reviewId);
+        const objId = this.validateObjectId(reviewId, "Review ID");
+        const review = await this.reviewModel.findById(objId);
         if (!review) {
             const error: any = new Error("Review not found");
             error.statusCode = 404;
@@ -722,23 +644,11 @@ export class ReviewService {
         }
 
         if (data.rating !== undefined && data.rating !== null) {
-            const ratingNum = Number(data.rating);
-            if (isNaN(ratingNum) || !Number.isFinite(ratingNum) || ratingNum < 1 || ratingNum > 5) {
-                const error: any = new Error("Rating must be a number between 1 and 5");
-                error.statusCode = 400;
-                throw error;
-            }
-            review.rating = Math.round(ratingNum);
+            review.rating = this.validateRating(data.rating);
         }
 
         if (data.comment !== undefined && data.comment !== null) {
-            const trimmed = String(data.comment).trim();
-            if (trimmed.length > 1000) {
-                const error: any = new Error("Comment cannot exceed 1000 characters");
-                error.statusCode = 400;
-                throw error;
-            }
-            review.comment = trimmed;
+            review.comment = this.validateComment(data.comment);
         }
 
         await review.save();
@@ -747,24 +657,22 @@ export class ReviewService {
             await this.recalculateExperienceRating(review.experience.toString());
         }
 
-        return this.reviewModel.findById(review._id)
-            .populate("reviewer", "firstname lastname email role avatar")
-            .populate("host", "firstname lastname email role avatar")
-            .populate("experience", "title photos location price")
-            .lean();
+        const findQuery = this.reviewModel.findById(review._id);
+        return typeof findQuery?.populate === "function"
+            ? await findQuery
+                .populate("reviewer", POPULATE_USER)
+                .populate("host", POPULATE_USER)
+                .populate("experience", POPULATE_EXPERIENCE)
+                .lean()
+            : review;
     }
 
     /**
      * Delete an existing review by owner or admin
      */
     public async deleteReview(reviewId: string, userId: string, userRole?: string): Promise<void> {
-        if (!reviewId || !mongoose.Types.ObjectId.isValid(reviewId)) {
-            const error: any = new Error("Invalid review ID format");
-            error.statusCode = 400;
-            throw error;
-        }
-
-        const review = await this.reviewModel.findById(reviewId);
+        const objId = this.validateObjectId(reviewId, "Review ID");
+        const review = await this.reviewModel.findById(objId);
         if (!review) {
             const error: any = new Error("Review not found");
             error.statusCode = 404;
@@ -778,7 +686,7 @@ export class ReviewService {
         }
 
         const experienceId = review.experience ? review.experience.toString() : null;
-        await this.reviewModel.findByIdAndDelete(reviewId);
+        await this.reviewModel.findByIdAndDelete(objId);
 
         if (experienceId) {
             await this.recalculateExperienceRating(experienceId);
@@ -793,13 +701,16 @@ export class ReviewService {
             return { affectedExperienceCount: 0 };
         }
 
+        const userObjectId = new mongoose.Types.ObjectId(userId);
         const userSubmittedReviews = await this.reviewModel.find({
-            reviewer: userId,
+            reviewer: userObjectId,
             experience: { $ne: null }
-        }).lean();
-        const affectedExpIds = [...new Set(userSubmittedReviews.map((r: any) => r.experience?.toString()).filter(Boolean))];
+        });
+        const submittedList = typeof userSubmittedReviews?.lean === "function" ? await userSubmittedReviews.lean() : userSubmittedReviews;
 
-        await this.reviewModel.deleteMany({ $or: [{ reviewer: userId }, { host: userId }] });
+        const affectedExpIds = [...new Set(((submittedList || []) as any[]).map((r: any) => r.experience?.toString()).filter(Boolean))];
+
+        await this.reviewModel.deleteMany({ $or: [{ reviewer: userObjectId }, { host: userObjectId }] });
 
         for (const expId of affectedExpIds) {
             await this.recalculateExperienceRating(expId as string);
@@ -809,43 +720,14 @@ export class ReviewService {
     }
 
     /**
-     * Get written reviews by a user for profile display (populated with host and experience)
-     */
-    public async getWrittenReviewsForProfile(userId: string): Promise<any[]> {
-        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-            return [];
-        }
-        return this.reviewModel.find({ reviewer: userId, comment: { $exists: true, $regex: /\S/ } })
-            .populate("host", "firstname lastname avatar")
-            .populate("experience", "title")
-            .sort({ createdAt: -1 })
-            .lean();
-    }
-
-    /**
-     * Get reviews for a specific experience
-     */
-    public async getExperienceReviews(experienceId: string, limit?: number): Promise<any[]> {
-        if (!experienceId || !mongoose.Types.ObjectId.isValid(experienceId)) {
-            return [];
-        }
-        let query = this.reviewModel.find({ experience: experienceId })
-            .populate("reviewer", "firstname lastname avatar")
-            .sort({ createdAt: -1 });
-        if (limit && Number(limit) > 0) {
-            query = query.limit(Math.min(Number(limit), 100));
-        }
-        return typeof query.lean === "function" ? query.lean() : query;
-    }
-
-    /**
      * Delete all reviews for an experience and reset experience ratings
      */
     public async deleteExperienceReviews(experienceId: string): Promise<number> {
         if (!experienceId || !mongoose.Types.ObjectId.isValid(experienceId)) {
             return 0;
         }
-        const result = await this.reviewModel.deleteMany({ experience: experienceId });
+        const expObjectId = new mongoose.Types.ObjectId(experienceId);
+        const result = await this.reviewModel.deleteMany({ experience: expObjectId });
         await this.recalculateExperienceRating(experienceId);
         return result?.deletedCount || 0;
     }

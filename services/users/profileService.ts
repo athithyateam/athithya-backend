@@ -439,9 +439,9 @@ export class ProfileService {
         let reviews: any[] = [];
         let reviewStats: any = null;
         if (user.role === 'host') {
-            const stats = await this.reviewService.calculateHostReviewStats(userId, currentUserId);
-            reviews = stats.reviews.slice(0, 10);
-            reviewStats = stats.reviewStats;
+            const hostReviewResult = await this.reviewService.getHostReviews(userId, { currentUserId, limit: 10, includeRatingOnly: false });
+            reviews = hostReviewResult.reviews;
+            reviewStats = hostReviewResult.reviewStats;
         }
 
         const currentUserIdStr = currentUserId?.toString();
@@ -490,14 +490,15 @@ export class ProfileService {
 
         const experiences = await this.experienceModel.find({ user: userId, status: 'active' }).sort({ createdAt: -1 });
 
-        const reviewsWritten = await this.reviewService.getWrittenReviewsForProfile(userId);
+        const writtenResult = await this.reviewService.getReviewerReviews(userId, { hasComment: true, limit: 100 });
+        const reviewsWritten = writtenResult.reviews;
 
         let reviewsReceived: any[] = [];
         let reviewStats: any = null;
         if (user.role === 'host') {
-            const stats = await this.reviewService.calculateHostReviewStats(userId, currentUserId);
-            reviewsReceived = stats.reviews;
-            reviewStats = stats.reviewStats;
+            const hostReviewResult = await this.reviewService.getHostReviews(userId, { currentUserId, limit: 100, includeRatingOnly: false });
+            reviewsReceived = hostReviewResult.reviews;
+            reviewStats = hostReviewResult.reviewStats;
         }
 
         const stats = {

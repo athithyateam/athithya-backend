@@ -80,11 +80,11 @@ const getReviewerReviews = async (req, res) => {
  */
 const getMyReviews = async (req, res) => {
     try {
-        const reviews = await reviewService.getMyReviews(req.user.userId);
+        const result = await reviewService.getReviewerReviews(req.user.userId, req.query);
         return res.status(200).json({
             success: true,
-            count: reviews.length,
-            reviews
+            count: result.count,
+            reviews: result.reviews
         });
     } catch (error) {
         console.error("Get my reviews error:", error);
@@ -108,7 +108,7 @@ const getReceivedReviews = async (req, res) => {
             });
         }
 
-        const result = await reviewService.getReceivedReviews(req.user.userId, req.query);
+        const result = await reviewService.getHostReviews(req.user.userId, req.query);
         return res.status(200).json({
             success: true,
             ...result
