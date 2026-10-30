@@ -1,8 +1,8 @@
 import mongoose from "mongoose";
-import { GroupBooking, Booking, Post, User, Notification } from "../../db/mongoose";
+const { GroupBooking, Booking, Experience, User, Notification } = require("../../db/mongoose");
 
 export interface FriendInviteInput {
-    postId: string;
+    experienceId?: string;
     friendId?: string;
     friendIds?: string[];
     bookingDate?: string | Date;
@@ -12,7 +12,7 @@ export interface FriendInviteInput {
 }
 
 export interface CreateGroupBookingInput {
-    postId: string;
+    experienceId?: string;
     invitedUserIds: string[];
     bookingDate: string | Date;
     numberOfPeople?: number;
@@ -24,7 +24,7 @@ export class GroupBookingService {
 
     private groupBookingModel: any;
     private bookingModel: any;
-    private postModel: any;
+    private experienceModel: any;
     private userModel: any;
     private notificationModel: any;
 
@@ -32,7 +32,7 @@ export class GroupBookingService {
         instanceKey: symbol,
         groupBookingModel: any = GroupBooking,
         bookingModel: any = Booking,
-        postModel: any = Post,
+        experienceModel: any = Experience,
         userModel: any = User,
         notificationModel: any = Notification
     ) {
@@ -41,7 +41,7 @@ export class GroupBookingService {
         }
         this.groupBookingModel = groupBookingModel;
         this.bookingModel = bookingModel;
-        this.postModel = postModel;
+        this.experienceModel = experienceModel;
         this.userModel = userModel;
         this.notificationModel = notificationModel;
     }
@@ -49,7 +49,7 @@ export class GroupBookingService {
     public static getInstance(
         groupBookingModel?: any,
         bookingModel?: any,
-        postModel?: any,
+        experienceModel?: any,
         userModel?: any,
         notificationModel?: any
     ): GroupBookingService {
@@ -58,7 +58,7 @@ export class GroupBookingService {
                 this.instanceKey,
                 groupBookingModel || GroupBooking,
                 bookingModel || Booking,
-                postModel || Post,
+                experienceModel || Experience,
                 userModel || User,
                 notificationModel || Notification
             );
@@ -83,9 +83,10 @@ export class GroupBookingService {
             throw err;
         }
 
-        const post = await this.postModel.findById(input.postId);
-        if (!post) {
-            const err: any = new Error("Post not found");
+        const expId = input.experienceId;
+        const experience = await this.experienceModel.findById(expId);
+        if (!experience) {
+            const err: any = new Error("Experience not found");
             err.statusCode = 404;
             throw err;
         }
@@ -117,9 +118,8 @@ export class GroupBookingService {
         if (!groupBooking) {
             groupBooking = new this.groupBookingModel({
                 initiator: initiatorUserId,
-                post: input.postId,
-                postType: post.postType,
-                postTitle: post.title,
+                experience: expId,
+                experienceTitle: experience.title,
                 invitedPeople: [],
                 bookingDate: input.bookingDate ? new Date(input.bookingDate) : new Date(),
                 numberOfPeople: input.numberOfPeople || 1,
@@ -156,10 +156,10 @@ export class GroupBookingService {
                     recipient: fId,
                     sender: initiatorUserId,
                     title: "Experience Invitation",
-                    message: `${initiator.firstname} ${initiator.lastname} invited you to join: "${post.title}"`,
+                    message: `${initiator.firstname} ${initiator.lastname} invited you to join: "${experience.title}"`,
                     type: 'invite_sent',
-                    link: `/post/${input.postId}?groupBookingId=${groupBooking._id}`,
-                    metadata: { postId: input.postId, groupBookingId: groupBooking._id }
+                    link: `/experience/${expId}?groupBookingId=${groupBooking._id}`,
+                    metadata: { experienceId: expId, groupBookingId: groupBooking._id }
                 });
 
                 if (io) {
@@ -181,8 +181,12 @@ export class GroupBookingService {
     /**
      * Remove an invited friend from a group booking
      */
-    public async removeInvitedFriend(postId: string, friendId: string, initiatorId: string): Promise<any> {
-        const groupBooking = await this.groupBookingModel.findOne({ post: postId, initiator: initiatorId, status: 'planning' });
+    public async removeInvitedFriend(experienceId: string, friendId: string, initiatorId: string): Promise<any> {
+        const groupBooking = await this.groupBookingModel.findOne({
+            $or: [{ experience: experienceId }, { post: experienceId }],
+            initiator: initiatorId,
+            status: 'planning'
+        });
         if (!groupBooking) {
             const err: any = new Error("Group booking not found");
             err.statusCode = 404;
@@ -194,7 +198,7 @@ export class GroupBookingService {
         await this.notificationModel.deleteMany({
             recipient: friendId,
             type: 'invite_sent',
-            'metadata.postId': postId
+            'metadata.experienceId': experienceId
         });
 
         await groupBooking.save();
@@ -209,7 +213,7 @@ export class GroupBookingService {
      */
     public async getMyGroupBookings(userId: string): Promise<any[]> {
         return await this.groupBookingModel.find({ initiator: userId })
-            .populate('post', 'title photos images price location')
+            .populate('experience', 'title photos images price location')
             .populate('invitedPeople.user', 'firstname lastname avatar')
             .populate('bookingId')
             .sort({ createdAt: -1 });
@@ -221,7 +225,7 @@ export class GroupBookingService {
     public async getReceivedInvites(userId: string): Promise<any[]> {
         return await this.groupBookingModel.find({ 'invitedPeople.user': userId })
             .populate('initiator', 'firstname lastname avatar')
-            .populate('post', 'title photos images price location')
+            .populate('experience', 'title photos images price location')
             .populate('bookingId')
             .sort({ createdAt: -1 });
     }
@@ -243,9 +247,10 @@ export class GroupBookingService {
             throw err;
         }
 
-        const post = await this.postModel.findById(input.postId);
-        if (!post) {
-            const err: any = new Error("Post not found");
+        const expId = input.experienceId;
+        const experience = await this.experienceModel.findById(expId);
+        if (!experience) {
+            const err: any = new Error("Experience not found");
             err.statusCode = 404;
             throw err;
         }
@@ -272,9 +277,8 @@ export class GroupBookingService {
 
         const groupBooking = new this.groupBookingModel({
             initiator: initiatorUserId,
-            post: input.postId,
-            postType: post.postType,
-            postTitle: post.title,
+            experience: expId,
+            experienceTitle: experience.title,
             invitedPeople,
             bookingDate: new Date(input.bookingDate),
             numberOfPeople: input.numberOfPeople || 1,
@@ -288,10 +292,10 @@ export class GroupBookingService {
                 recipient: friend._id,
                 sender: initiatorUserId,
                 title: "Experience Invitation",
-                message: `${initiator.firstname} ${initiator.lastname} invited you to join: "${post.title}"`,
+                message: `${initiator.firstname} ${initiator.lastname} invited you to join: "${experience.title}"`,
                 type: 'invite_sent',
-                link: `/post/${input.postId}?groupBookingId=${groupBooking._id}`,
-                metadata: { postId: input.postId, groupBookingId: groupBooking._id }
+                link: `/experience/${expId}?groupBookingId=${groupBooking._id}`,
+                metadata: { experienceId: expId, groupBookingId: groupBooking._id }
             });
             if (io) io.to(friend._id.toString()).emit('new_notification', notification);
         }));
@@ -328,7 +332,7 @@ export class GroupBookingService {
                     recipient: groupBooking.initiator,
                     sender: userId,
                     title: "Group Ready!",
-                    message: `Everyone accepted for "${groupBooking.postTitle}"!`,
+                    message: `Everyone accepted for "${groupBooking.experienceTitle || "the experience"}"!`,
                     type: 'booking_accepted',
                     metadata: { groupBookingId: groupBooking._id }
                 });
@@ -343,14 +347,14 @@ export class GroupBookingService {
     /**
      * Get group booking status with timeout and auto-accept logic
      */
-    public async getGroupBookingStatus(postId: string, groupBookingId?: string, currentUserId?: string): Promise<any> {
+    public async getGroupBookingStatus(experienceId: string, groupBookingId?: string, currentUserId?: string): Promise<any> {
         let groupBooking = null;
 
         // 1. Priority: Find by ID
         if (groupBookingId && mongoose.Types.ObjectId.isValid(groupBookingId)) {
             groupBooking = await this.groupBookingModel.findOne({
                 _id: groupBookingId,
-                post: postId,
+                $or: [{ experience: experienceId }, { post: experienceId }],
                 status: { $in: ['planning', 'confirmed'] }
             })
             .populate('initiator', 'firstname lastname avatar')
@@ -378,7 +382,7 @@ export class GroupBookingService {
         // 2. Fallback: Initiator
         if (!groupBooking && currentUserId) {
             groupBooking = await this.groupBookingModel.findOne({
-                post: postId,
+                $or: [{ experience: experienceId }, { post: experienceId }],
                 initiator: currentUserId,
                 status: 'planning'
             })
@@ -389,7 +393,7 @@ export class GroupBookingService {
         // 3. Fallback: Invited Participants
         if (!groupBooking && currentUserId) {
             groupBooking = await this.groupBookingModel.findOne({
-                post: postId,
+                $or: [{ experience: experienceId }, { post: experienceId }],
                 'invitedPeople.user': currentUserId,
                 status: 'planning'
             })

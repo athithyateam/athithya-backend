@@ -28,6 +28,6 @@ friendRequestSchema.index({ recipient: 1, status: 1, createdAt: -1 });
 // Optimize checking sent friend requests
 friendRequestSchema.index({ sender: 1, status: 1 });
 
-const FriendRequest = mongoose.model("friendRequest", friendRequestSchema);
+const FriendRequest = mongoose.models.friendRequest || mongoose.model("friendRequest", friendRequestSchema);
 
 module.exports = FriendRequest;

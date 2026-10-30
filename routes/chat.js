@@ -49,7 +49,4 @@ chatRouter.delete("/messages/:messageId", checkAuth, chatHandler.deleteMessage);
 // DELETE/CLEAR all messages in a conversation
 chatRouter.delete("/conversations/:conversationId/clear", checkAuth, chatHandler.clearConversation);
 
-// UPDATE Itinerary (Add/Remove Pin)
-chatRouter.post("/conversations/:conversationId/itinerary", checkAuth, chatHandler.updateChatItinerary);
-
 module.exports = chatRouter;

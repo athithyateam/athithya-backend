@@ -22,6 +22,6 @@ hostPinnedExperienceMediaSchema.index({ user: 1, mediaKey: 1 }, { unique: true }
 // Optimize retrieval sorted by pin recency
 hostPinnedExperienceMediaSchema.index({ user: 1, pinnedAt: -1 });
 
-const HostPinnedExperienceMedia = mongoose.model("hostPinnedExperienceMedia", hostPinnedExperienceMediaSchema);
+const HostPinnedExperienceMedia = mongoose.models.hostPinnedExperienceMedia || mongoose.model("hostPinnedExperienceMedia", hostPinnedExperienceMediaSchema);
 
 module.exports = HostPinnedExperienceMedia;

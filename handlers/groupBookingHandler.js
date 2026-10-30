@@ -12,7 +12,8 @@ const sendFriendInvite = async (req, res) => {
 
 const removeInvitedFriend = async (req, res) => {
     try {
-        const data = await groupBookingService.removeInvitedFriend(req.params.postId, req.params.friendId, req.user.userId);
+        const expId = req.params.experienceId;
+        const data = await groupBookingService.removeInvitedFriend(expId, req.params.friendId, req.user.userId);
         res.json({ success: true, data });
     } catch (err) {
         res.status(err.statusCode || 500).json({ success: false, message: err.message });
@@ -59,8 +60,9 @@ const respondToInvite = async (req, res) => {
 
 const getGroupBookingStatus = async (req, res) => {
     try {
+        const expId = req.params.experienceId;
         const targetBookingId = req.query.groupBookingId || req.query.scheduleId;
-        const data = await groupBookingService.getGroupBookingStatus(req.params.postId, targetBookingId, req.user?.userId);
+        const data = await groupBookingService.getGroupBookingStatus(expId, targetBookingId, req.user?.userId);
         res.json({ success: true, data });
     } catch (err) {
         res.status(err.statusCode || 500).json({ success: false, message: err.message });

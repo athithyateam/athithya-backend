@@ -1,4 +1,4 @@
-const { Post, Booking, Notification, HostAuditLog } = require("../../db/mongoose");
+const { Experience, Booking, Notification, HostAuditLog, User, SavedExperience, Review } = require("../../db/mongoose");
 const { deleteFile } = require("../../services/storageService");
 const { sendHtmlEmail } = require("../../services/emailService");
 const { notificationService } = require("../../services/notificationService");
@@ -11,7 +11,6 @@ exports.getAllExperiences = async (req, res) => {
         const category = req.query.category || "";
         const host = req.query.host || "";
         
-        const { User } = require("../../db/mongoose");
         let query = {};
 
         if (category) {
@@ -53,12 +52,12 @@ exports.getAllExperiences = async (req, res) => {
             }
         }
 
-        const totalDocuments = await Post.countDocuments(query);
+        const totalDocuments = await Experience.countDocuments(query);
         const totalPages = Math.ceil(totalDocuments / limit);
 
-        const experiences = await Post.find(query)
+        const experiences = await Experience.find(query)
             .populate("user", "firstname lastname avatar email")
-            .select("-policies -accessibility -what_to_bring -itinerary -reactions -pendingUpdate")
+            .select("-pendingUpdate")
             .sort({ createdAt: -1 })
             .skip((page - 1) * limit)
             .limit(limit)
@@ -78,7 +77,7 @@ exports.getAllExperiences = async (req, res) => {
 
 exports.getPendingExperiences = async (req, res) => {
     try {
-        const experiences = await Post.find({
+        const experiences = await Experience.find({
             $or: [
                 { status: "pending" },
                 { pendingUpdate: { $ne: null } },
@@ -136,9 +135,9 @@ exports.getPendingExperiences = async (req, res) => {
 exports.updateExperience = async (req, res) => {
     try {
         const updates = req.body;
-        const post = await Post.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true, runValidators: true });
-        if (!post) return res.status(404).json({ success: false, message: "Experience not found" });
-        res.json({ success: true, message: "Experience updated successfully", post });
+        const experience = await Experience.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true, runValidators: true });
+        if (!experience) return res.status(404).json({ success: false, message: "Experience not found" });
+        res.json({ success: true, message: "Experience updated successfully", experience });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -151,42 +150,41 @@ exports.updateExperienceStatus = async (req, res) => {
             return res.status(400).json({ success: false, message: "Invalid status" });
         }
 
-        const post = await Post.findById(req.params.id).populate('user');
-        if (!post) return res.status(404).json({ success: false, message: "Post not found" });
+        const experience = await Experience.findById(req.params.id).populate('user');
+        if (!experience) return res.status(404).json({ success: false, message: "Experience not found" });
 
-        const hostUser = post.user;
+        const hostUser = experience.user;
         const hostEmail = hostUser?.email;
         const hostFirstName = hostUser?.firstname || "Host";
 
-        if (post.deleteRequested) {
+        if (experience.deleteRequested) {
             if (status === 'active') {
-                const hostId = post.user?._id || post.user;
-                const postTitle = post.title;
+                const hostId = experience.user?._id || experience.user;
+                const experienceTitle = experience.title;
                 // ── 1. Archive to HostAuditLog FIRST (while S3 files still exist) ──
                 try {
-                    const hostName = post.user ? `${post.user.firstname} ${post.user.lastname}` : "Unknown Host";
+                    const hostName = experience.user ? `${experience.user.firstname} ${experience.user.lastname}` : "Unknown Host";
                     
                     await HostAuditLog.create({
                         type: "experience_delete",
                         hostId: hostId,
                         hostName: hostName,
                         snapshot: {
-                            title: post.title || "",
-                            subtitle: post.subtitle || "",
-                            description: post.description || "",
-                            longDescription: post.longDescription || "",
-                            price: post.price,
-                            duration: post.duration,
-                            location: post.location,
-                            capacity: post.capacity,
-                            amenities: post.amenities || [],
-                            rules: post.privacyPolicy || [],
-                            photos: post.photos || [],
-                            categories: post.categories || []
+                            title: experience.title || "",
+                            subtitle: experience.subtitle || "",
+                            description: experience.description || "",
+                            longDescription: experience.longDescription || "",
+                            price: experience.price,
+                            duration: experience.duration,
+                            location: experience.location,
+                            capacity: experience.capacity,
+                            amenities: experience.amenities || [],
+                            rules: experience.privacyPolicy || [],
+                            photos: experience.photos || [],
+                            categories: experience.categories || []
                         }
                     });
                     
-                    // Prune to only keep last 10 experience_delete records globally
                     const items = await HostAuditLog.find({ type: "experience_delete" }).sort({ createdAt: -1 });
                     if (items.length > 10) {
                         const idsToDelete = items.slice(10).map(item => item._id);
@@ -197,29 +195,30 @@ exports.updateExperienceStatus = async (req, res) => {
                 }
 
                 // ── 2. Now delete S3 assets and bookings ──
-                const assets = [...(post.photos || []), ...(post.videos || [])];
+                const assets = [...(experience.photos || []), ...(experience.videos || [])];
                 for (const asset of assets) {
                     if (asset.public_id) {
                         await deleteFile(asset.public_id);
                     }
                 }
                 await Booking.updateMany(
-                    { post: post._id, status: { $in: ['pending', 'accepted', 'in_progress', 'cancel_requested'] } },
+                    { experience: experience._id, status: { $in: ['pending', 'accepted', 'in_progress', 'cancel_requested'] } },
                     { $set: { status: 'cancelled' } }
                 );
 
-                // ── 3. Finally delete the post document ──
-                await Post.findByIdAndDelete(post._id);
+                // ── 3. Clean bookmarks and reviews, then delete experience ──
+                await SavedExperience.deleteMany({ experience: experience._id });
+                await Review.deleteMany({ experience: experience._id });
+                await Experience.findByIdAndDelete(experience._id);
 
                 await notificationService.sendNotification({
                     recipient: hostId,
                     sender: req.user.userId,
                     title: "Experience Deletion Approved",
-                    message: `The experience "${postTitle}" you requested for deletion has successfully been approved and deleted.`,
+                    message: `The experience "${experienceTitle}" you requested for deletion has successfully been approved and deleted.`,
                     type: "success"
                 });
 
-                // Send email
                 if (hostEmail) {
                     const subject = "Experience Deletion Approved - Athithya";
                     const htmlContent = `
@@ -233,7 +232,7 @@ exports.updateExperienceStatus = async (req, res) => {
                                     Hi ${hostFirstName},
                                 </p>
                                 <p style="color: #555; font-size: 16px; line-height: 1.6;">
-                                    The experience "${postTitle}" you requested for deletion has successfully been approved and deleted.
+                                    The experience "${experienceTitle}" you requested for deletion has successfully been approved and deleted.
                                 </p>
                             </div>
                         </div>
@@ -243,19 +242,18 @@ exports.updateExperienceStatus = async (req, res) => {
 
                 return res.json({ success: true, message: "Experience deletion request approved and deleted successfully" });
             } else if (status === 'inactive') {
-                post.deleteRequested = false;
-                await post.save();
+                experience.deleteRequested = false;
+                await experience.save();
 
                 await notificationService.sendNotification({
-                    recipient: post.user?._id || post.user,
+                    recipient: experience.user?._id || experience.user,
                     sender: req.user.userId,
                     title: "Experience Deletion Rejected",
-                    message: `The deletion request for your experience "${post.title}" was reviewed and rejected. The experience remains active.`,
+                    message: `The deletion request for your experience "${experience.title}" was reviewed and rejected. The experience remains active.`,
                     type: "info",
-                    link: `/profile/${post.user?._id || post.user}`
+                    link: `/profile/${experience.user?._id || experience.user}`
                 });
 
-                // Send email
                 if (hostEmail) {
                     const subject = "Experience Deletion Rejected - Athithya";
                     const htmlContent = `
@@ -269,7 +267,7 @@ exports.updateExperienceStatus = async (req, res) => {
                                     Hi ${hostFirstName},
                                 </p>
                                 <p style="color: #555; font-size: 16px; line-height: 1.6;">
-                                    The deletion request for your experience "${post.title}" was reviewed and rejected. The experience remains active.
+                                    The deletion request for your experience "${experience.title}" was reviewed and rejected. The experience remains active.
                                 </p>
                             </div>
                         </div>
@@ -277,139 +275,134 @@ exports.updateExperienceStatus = async (req, res) => {
                     sendHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send deletion rejected email:", err));
                 }
 
-                return res.json({ success: true, message: "Experience deletion request rejected. Post remains active.", post });
+                return res.json({ success: true, message: "Experience deletion request rejected. Experience remains active.", experience });
             }
         }
 
-        if (post.hideRequested) {
+        if (experience.hideRequested) {
             if (status === 'active') {
-                post.isHidden = true;
-                post.hideRequested = false;
-                post.unhideRequested = false;
-                await post.save();
+                experience.isHidden = true;
+                experience.hideRequested = false;
+                experience.unhideRequested = false;
+                await experience.save();
 
                 await notificationService.sendNotification({
-                    recipient: post.user?._id || post.user,
+                    recipient: experience.user?._id || experience.user,
                     sender: req.user.userId,
                     title: "Experience Hide Request Approved",
-                    message: `Your request to hide experience "${post.title}" has been approved by admin.`,
+                    message: `Your request to hide experience "${experience.title}" has been approved by admin.`,
                     type: "info",
-                    link: `/profile/${post.user?._id || post.user}`
+                    link: `/profile/${experience.user?._id || experience.user}`
                 });
 
-                return res.json({ success: true, message: "Experience hide request approved successfully", post });
+                return res.json({ success: true, message: "Experience hide request approved successfully", experience });
             } else if (status === 'inactive') {
-                post.hideRequested = false;
-                await post.save();
+                experience.hideRequested = false;
+                await experience.save();
 
                 await notificationService.sendNotification({
-                    recipient: post.user?._id || post.user,
+                    recipient: experience.user?._id || experience.user,
                     sender: req.user.userId,
                     title: "Experience Hide Request Rejected",
-                    message: `Your request to hide experience "${post.title}" was reviewed and rejected.`,
+                    message: `Your request to hide experience "${experience.title}" was reviewed and rejected.`,
                     type: "info",
-                    link: `/profile/${post.user?._id || post.user}`
+                    link: `/profile/${experience.user?._id || experience.user}`
                 });
 
-                return res.json({ success: true, message: "Experience hide request rejected", post });
+                return res.json({ success: true, message: "Experience hide request rejected", experience });
             }
         }
 
-        if (post.unhideRequested) {
+        if (experience.unhideRequested) {
             if (status === 'active') {
-                post.isHidden = false;
-                post.unhideRequested = false;
-                post.hideRequested = false;
-                await post.save();
+                experience.isHidden = false;
+                experience.unhideRequested = false;
+                experience.hideRequested = false;
+                await experience.save();
 
                 await notificationService.sendNotification({
-                    recipient: post.user?._id || post.user,
+                    recipient: experience.user?._id || experience.user,
                     sender: req.user.userId,
                     title: "Experience Unhide Request Approved",
-                    message: `Your request to unhide experience "${post.title}" has been approved by admin. It is now live on the platform.`,
+                    message: `Your request to unhide experience "${experience.title}" has been approved by admin. It is now live on the platform.`,
                     type: "success",
-                    link: `/profile/${post.user?._id || post.user}`
+                    link: `/profile/${experience.user?._id || experience.user}`
                 });
 
-                return res.json({ success: true, message: "Experience unhide request approved successfully", post });
+                return res.json({ success: true, message: "Experience unhide request approved successfully", experience });
             } else if (status === 'inactive') {
-                post.unhideRequested = false;
-                await post.save();
+                experience.unhideRequested = false;
+                await experience.save();
 
                 await notificationService.sendNotification({
-                    recipient: post.user?._id || post.user,
+                    recipient: experience.user?._id || experience.user,
                     sender: req.user.userId,
                     title: "Experience Unhide Request Rejected",
-                    message: `Your request to unhide experience "${post.title}" was reviewed and rejected.`,
+                    message: `Your request to unhide experience "${experience.title}" was reviewed and rejected.`,
                     type: "info",
-                    link: `/profile/${post.user?._id || post.user}`
+                    link: `/profile/${experience.user?._id || experience.user}`
                 });
 
-                return res.json({ success: true, message: "Experience unhide request rejected", post });
+                return res.json({ success: true, message: "Experience unhide request rejected", experience });
             }
         }
 
         if (status === 'active') {
-            if (post.pendingUpdate) {
-                // Apply all fields from pendingUpdate to the main post fields
+            if (experience.pendingUpdate) {
                 const fieldsToCopy = [
                     'title', 'subtitle', 'description', 'longDescription', 'location', 'price',
                     'amenities', 'capacity', 'availability', 'categories', 'difficulty',
                     'duration', 'privacyPolicy', 'discounts', 'season', 'plan', 'photos', 'videos', 'isFeatured'
                 ];
                 fieldsToCopy.forEach(field => {
-                    if (post.pendingUpdate[field] !== undefined) {
-                        post[field] = post.pendingUpdate[field];
+                    if (experience.pendingUpdate[field] !== undefined) {
+                        experience[field] = experience.pendingUpdate[field];
                     }
                 });
-                post.pendingUpdate = null;
+                experience.pendingUpdate = null;
             }
-            post.status = 'active';
-            post.approvedAt = new Date();
-            post.isHidden = false;
-            post.deleteRequested = false;
-            post.hideRequested = false;
-            post.unhideRequested = false;
+            experience.status = 'active';
+            experience.approvedAt = new Date();
+            experience.isHidden = false;
+            experience.deleteRequested = false;
+            experience.hideRequested = false;
+            experience.unhideRequested = false;
         } else if (status === 'inactive') {
-            // Rejecting the changes
-            if (post.status === 'active') {
-                // If it was already active, keep it active but clear pendingUpdate
-                post.pendingUpdate = null;
+            if (experience.status === 'active') {
+                experience.pendingUpdate = null;
             } else {
-                // Otherwise, mark it inactive and clear pendingUpdate
-                post.status = 'inactive';
-                post.pendingUpdate = null;
+                experience.status = 'inactive';
+                experience.pendingUpdate = null;
             }
-            post.deleteRequested = false;
-            post.hideRequested = false;
-            post.unhideRequested = false;
+            experience.deleteRequested = false;
+            experience.hideRequested = false;
+            experience.unhideRequested = false;
         } else {
-            post.status = status;
+            experience.status = status;
         }
 
         if (remarks !== undefined) {
-            post.adminRemarks = remarks;
+            experience.adminRemarks = remarks;
         }
 
-        await post.save();
-        await Post.updateOne({ _id: post._id }, { $unset: { pendingUpdate: 1 } });
+        await experience.save();
+        await Experience.updateOne({ _id: experience._id }, { $unset: { pendingUpdate: 1 } });
 
-        // Handle standard post approval/rejection notifications
         if (status === 'active' || status === 'inactive') {
             const isApproved = status === 'active';
             const emailSubject = isApproved ? "Experience Approved & Published! - Athithya" : "Experience Submission Update - Athithya";
             const emailMessage = isApproved
-                ? `Congratulations! Your experience "${post.title}" has been approved and is now active on Athithya.`
-                : `Your experience "${post.title}" was reviewed and rejected. ${remarks ? `Remarks: ${remarks}` : "Please check your details and try again."}`;
+                ? `Congratulations! Your experience "${experience.title}" has been approved and is now active on Athithya.`
+                : `Your experience "${experience.title}" was reviewed and rejected. ${remarks ? `Remarks: ${remarks}` : "Please check your details and try again."}`;
 
             try {
                 await notificationService.sendNotification({
-                    recipient: post.user?._id || post.user,
+                    recipient: experience.user?._id || experience.user,
                     sender: req.user?.userId || req.user?.id,
                     title: isApproved ? "Experience Approved" : "Experience Rejected",
                     message: emailMessage,
                     type: isApproved ? "success" : "error",
-                    link: isApproved ? `/post/${post._id}` : `/profile/${post.user?._id || post.user}`
+                    link: isApproved ? `/experiences/${experience._id}` : `/profile/${experience.user?._id || experience.user}`
                 });
 
                 if (hostEmail) {
@@ -441,7 +434,7 @@ exports.updateExperienceStatus = async (req, res) => {
             }
         }
 
-        res.json({ success: true, message: `Experience status updated to ${status}`, post });
+        res.json({ success: true, message: `Experience status updated to ${status}`, experience });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -449,32 +442,33 @@ exports.updateExperienceStatus = async (req, res) => {
 
 exports.deleteExperience = async (req, res) => {
     try {
-        const post = await Post.findById(req.params.id);
-        if (!post) return res.status(404).json({ success: false, message: "Experience not found" });
+        const experience = await Experience.findById(req.params.id);
+        if (!experience) return res.status(404).json({ success: false, message: "Experience not found" });
 
-        // Delete S3 assets (photos/videos)
-        const assets = [...(post.photos || []), ...(post.videos || [])];
+        const assets = [...(experience.photos || []), ...(experience.videos || [])];
         for (const asset of assets) {
+            if (asset.public_id) {
                 await deleteFile(asset.public_id);
+            }
         }
 
-        // Cascade soft-delete active bookings
         await Booking.updateMany(
-            { post: req.params.id, status: { $in: ['pending', 'accepted', 'in_progress', 'cancel_requested'] } },
+            { experience: req.params.id, status: { $in: ['pending', 'accepted', 'in_progress', 'cancel_requested'] } },
             { $set: { status: 'cancelled' } }
         );
 
-        // Remove any HostAuditLog audit records belonging to this host for this experience title
         await HostAuditLog.deleteMany({
             type: "experience_delete",
-            hostId: post.user,
+            hostId: experience.user,
             $or: [
-                { 'snapshot.title': post.title },
-                { experienceTitle: post.title }
+                { 'snapshot.title': experience.title },
+                { experienceTitle: experience.title }
             ]
         });
 
-        await Post.findByIdAndDelete(req.params.id);
+        await SavedExperience.deleteMany({ experience: req.params.id });
+        await Review.deleteMany({ experience: req.params.id });
+        await Experience.findByIdAndDelete(req.params.id);
         res.json({ success: true, message: "Experience deleted successfully" });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });

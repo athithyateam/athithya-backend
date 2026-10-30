@@ -17,10 +17,10 @@ router.post("/", checkAuth, wishlistScheduleHandler.scheduleExperience);
 router.get("/me", checkAuth, wishlistScheduleHandler.getMyWishlistSchedules);
 
 /**
- * GET /api/wishlist-schedules/check/:postId
- * Check if the logged-in user has scheduled a specific post
+ * GET /api/wishlist-schedules/check/:experienceId
+ * Check if the logged-in user has scheduled a specific experience
  */
-router.get("/check/:postId", checkAuth, wishlistScheduleHandler.checkScheduleStatus);
+router.get("/check/:experienceId", checkAuth, wishlistScheduleHandler.checkScheduleStatus);
 
 /**
  * DELETE /api/wishlist-schedules/:id

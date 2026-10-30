@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
-import { User, Post, Review, Notification, HostDetails, HostAuditLog, Friendship, FriendRequest, SavedPost } from "../../db/mongoose";
+const { User, Experience, Review, Notification, HostDetails, HostAuditLog, Friendship, FriendRequest, SavedExperience } = require("../../db/mongoose");
 import { deleteFile } from "../storageService";
-import { parseIfJson, recordHostAuditLog } from "../posts/postPayloadParser";
+import { parseIfJson, recordHostAuditLog } from "../experiences/experiencePayloadParser";
 import { sendTemplateEmail } from "../emailService";
 import { notificationService } from "../notificationService";
 import { normalizePhoneNumber, renderDocumentListHtml } from "./verificationService";
@@ -20,28 +20,28 @@ export class ProfileService {
     private static instanceKey = Symbol("ProfileServiceInstanceKey");
 
     private userModel: any;
-    private postModel: any;
+    private experienceModel: any;
     private reviewModel: any;
     private notificationModel: any;
     private hostDetailsModel: any;
     private hostAuditLogModel: any;
     private friendshipModel: any;
     private friendRequestModel: any;
-    private savedPostModel: any;
+    private savedExperienceModel: any;
     private fileDeleter: (key: string) => Promise<any>;
     private emailNotifier: (options: any) => Promise<any>;
 
     constructor(
         instanceKey: symbol,
         userModel: any = User,
-        postModel: any = Post,
+        experienceModel: any = Experience,
         reviewModel: any = Review,
         notificationModel: any = Notification,
         hostDetailsModel: any = HostDetails,
         hostAuditLogModel: any = HostAuditLog,
         friendshipModel: any = Friendship,
         friendRequestModel: any = FriendRequest,
-        savedPostModel: any = SavedPost,
+        savedExperienceModel: any = SavedExperience,
         fileDeleter: (key: string) => Promise<any> = deleteFile,
         emailNotifier: (options: any) => Promise<any> = sendTemplateEmail
     ) {
@@ -49,28 +49,28 @@ export class ProfileService {
             throw new Error("Please use ProfileService.getInstance() to retrieve or create an instance");
         }
         this.userModel = userModel;
-        this.postModel = postModel;
+        this.experienceModel = experienceModel;
         this.reviewModel = reviewModel;
         this.notificationModel = notificationModel;
         this.hostDetailsModel = hostDetailsModel;
         this.hostAuditLogModel = hostAuditLogModel;
         this.friendshipModel = friendshipModel;
         this.friendRequestModel = friendRequestModel;
-        this.savedPostModel = savedPostModel;
+        this.savedExperienceModel = savedExperienceModel;
         this.fileDeleter = fileDeleter;
         this.emailNotifier = emailNotifier;
     }
 
     public static getInstance(
         userModel?: any,
-        postModel?: any,
+        experienceModel?: any,
         reviewModel?: any,
         notificationModel?: any,
         hostDetailsModel?: any,
         hostAuditLogModel?: any,
         friendshipModel?: any,
         friendRequestModel?: any,
-        savedPostModel?: any,
+        savedExperienceModel?: any,
         fileDeleter?: (key: string) => Promise<any>,
         emailNotifier?: (options: any) => Promise<any>
     ): ProfileService {
@@ -78,14 +78,14 @@ export class ProfileService {
             this.instance = new ProfileService(
                 this.instanceKey,
                 userModel || User,
-                postModel || Post,
+                experienceModel || Experience,
                 reviewModel || Review,
                 notificationModel || Notification,
                 hostDetailsModel || HostDetails,
                 hostAuditLogModel || HostAuditLog,
                 friendshipModel || Friendship,
                 friendRequestModel || FriendRequest,
-                savedPostModel || SavedPost,
+                savedExperienceModel || SavedExperience,
                 fileDeleter || deleteFile,
                 emailNotifier || sendTemplateEmail
             );
@@ -134,7 +134,7 @@ export class ProfileService {
         const hostObjectId = new mongoose.Types.ObjectId(hostId);
         const allHostReviews = await this.reviewModel.find({ host: hostId })
             .populate('reviewer', 'firstname lastname avatar')
-            .populate('post', 'title postType')
+            .populate('post', 'title')
             .sort({ createdAt: -1 });
 
         const writtenReviews = allHostReviews.filter((r: any) => r.comment && r.comment.trim() !== "");
@@ -230,10 +230,10 @@ export class ProfileService {
         }
 
         const friendsCount = await this.friendshipModel.countDocuments({ user: user._id });
-        let savedPosts: any[] | undefined = undefined;
+        let savedExperiences: any[] | undefined = undefined;
         if (isOwnProfileOrAdmin) {
-            const saved = await this.savedPostModel.find({ user: user._id }).select('post');
-            savedPosts = saved.map((s: any) => s.post);
+            const saved = await this.savedExperienceModel.find({ user: user._id }).select('experience');
+            savedExperiences = saved.map((s: any) => s.experience);
         }
 
         return {
@@ -254,7 +254,7 @@ export class ProfileService {
             friendsCount,
             interests: user.interests || [],
             walletBalance: isOwnProfileOrAdmin ? (user.walletBalance || 0) : undefined,
-            savedPosts,
+            savedExperiences,
             createdAt: user.createdAt,
             updatedAt: user.updatedAt
         };
@@ -338,9 +338,9 @@ export class ProfileService {
     }
 
     /**
-     * Service: Get user saved posts
+     * Service: Get user saved experiences
      */
-    public async getSavedPosts(userId: string): Promise<any[]> {
+    public async getSavedExperiences(userId: string): Promise<any[]> {
         const userExists = await this.userModel.exists({ _id: userId });
         if (!userExists) {
             const error: any = new Error("User not found");
@@ -348,23 +348,23 @@ export class ProfileService {
             throw error;
         }
 
-        const savedDocs = await this.savedPostModel.find({ user: userId })
+        const savedDocs = await this.savedExperienceModel.find({ user: userId })
             .sort({ createdAt: -1 })
             .populate({
-                path: "post",
+                path: "experience",
                 populate: {
                     path: "user",
                     select: "firstname lastname avatar"
                 }
             });
 
-        return savedDocs.map((s: any) => s.post).filter(Boolean);
+        return savedDocs.map((s: any) => s.experience).filter(Boolean);
     }
 
     /**
-     * Service: Add post to user saved posts
+     * Service: Add experience to user saved experiences
      */
-    public async addSavedPost(userId: string, postId: string): Promise<boolean> {
+    public async addSavedExperience(userId: string, experienceId: string): Promise<boolean> {
         const userExists = await this.userModel.exists({ _id: userId });
         if (!userExists) {
             const error: any = new Error("User not found");
@@ -372,18 +372,21 @@ export class ProfileService {
             throw error;
         }
 
-        const existing = await this.savedPostModel.findOne({ user: userId, post: postId });
+        const existing = await this.savedExperienceModel.findOne({
+            user: userId,
+            experience: experienceId
+        });
         if (!existing) {
-            await this.savedPostModel.create({ user: userId, post: postId });
+            await this.savedExperienceModel.create({ user: userId, experience: experienceId });
             return true;
         }
         return false;
     }
 
     /**
-     * Service: Remove post from user saved posts
+     * Service: Remove experience from user saved experiences
      */
-    public async removeSavedPost(userId: string, postId: string): Promise<boolean> {
+    public async removeSavedExperience(userId: string, experienceId: string): Promise<boolean> {
         const userExists = await this.userModel.exists({ _id: userId });
         if (!userExists) {
             const error: any = new Error("User not found");
@@ -391,7 +394,10 @@ export class ProfileService {
             throw error;
         }
 
-        const result = await this.savedPostModel.deleteOne({ user: userId, post: postId });
+        const result = await this.savedExperienceModel.deleteOne({
+            user: userId,
+            experience: experienceId
+        });
         return result.deletedCount > 0;
     }
 
@@ -401,10 +407,10 @@ export class ProfileService {
     public async getHostRating(hostId: string): Promise<{ average: number; count: number }> {
         if (!hostId) return { average: 0, count: 0 };
         const hostObjectId = new mongoose.Types.ObjectId(hostId);
-        const hostPosts = await this.postModel.find({ user: hostObjectId }).select('_id');
-        const hostPostIds = hostPosts.map((p: any) => p._id);
-        const baseMatch = hostPostIds.length > 0
-            ? { $or: [{ host: hostObjectId }, { post: { $in: hostPostIds } }] }
+        const hostExperiences = await this.experienceModel.find({ user: hostObjectId }).select('_id');
+        const hostExperienceIds = hostExperiences.map((p: any) => p._id);
+        const baseMatch = hostExperienceIds.length > 0
+            ? { $or: [{ host: hostObjectId }, { experience: { $in: hostExperienceIds } }] }
             : { host: hostObjectId };
 
         const hostStats = await this.reviewModel.aggregate([
@@ -453,28 +459,19 @@ export class ProfileService {
             baseQuery.isHidden = { $ne: true };
         }
 
-        const totalPosts = await this.postModel.countDocuments(baseQuery);
-        const posts = await this.postModel.find(baseQuery)
+        const totalExperiences = await this.experienceModel.countDocuments(baseQuery);
+        const experiences = await this.experienceModel.find(baseQuery)
             .populate('user', 'firstname lastname avatar role username isHostVerified verifiedBadge')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limitNum);
 
-        const postCounts = await this.postModel.aggregate([
-            { $match: baseQuery },
-            { $group: { _id: '$postType', count: { $sum: 1 } } }
-        ]);
-        const postCountsMap = new Map(postCounts.map((c: any) => [c._id, c.count]));
-
-        const postStats = {
-            total: totalPosts,
-            experiences: postCountsMap.get('experience') || 0,
-            services: postCountsMap.get('service') || 0,
-            treks: postCountsMap.get('trek') || 0,
-            plans: postCountsMap.get('plan') || 0
+        const experienceStats = {
+            total: totalExperiences,
+            experiences: totalExperiences
         };
 
-        const totalPages = Math.ceil(totalPosts / limitNum);
+        const totalPages = Math.ceil(totalExperiences / limitNum);
 
         let reviews: any[] = [];
         let reviewStats: any = null;
@@ -494,10 +491,10 @@ export class ProfileService {
 
         return {
             user: userData,
-            postStats,
-            posts,
+            experienceStats,
+            experiences,
             pagination: {
-                totalPosts,
+                totalExperiences,
                 totalPages,
                 currentPage: pageNum,
                 limit: limitNum
@@ -508,7 +505,7 @@ export class ProfileService {
     }
 
     /**
-     * Service: Get complete profile with categorized posts and stats
+     * Service: Get complete profile with categorized experiences and stats
      */
     public async getCompleteProfile(
         userId: string,
@@ -528,16 +525,11 @@ export class ProfileService {
             throw error;
         }
 
-        const posts = await this.postModel.find({ user: userId, status: 'active' }).sort({ createdAt: -1 });
-        const experiences = posts.filter((p: any) => p.postType === 'experience');
-        const services = posts.filter((p: any) => p.postType === 'service');
-        const treks = posts.filter((p: any) => p.postType === 'trek');
-        const plans = posts.filter((p: any) => p.postType === 'plan');
-        const itineraries = plans;
+        const experiences = await this.experienceModel.find({ user: userId, status: 'active' }).sort({ createdAt: -1 });
 
         const reviewsWritten = await this.reviewModel.find({ reviewer: userId, comment: { $exists: true, $ne: "" } })
             .populate('host', 'firstname lastname avatar')
-            .populate('post', 'title postType')
+            .populate('experience', 'title')
             .sort({ createdAt: -1 });
 
         let reviewsReceived: any[] = [];
@@ -549,8 +541,7 @@ export class ProfileService {
         }
 
         const stats = {
-            posts: { total: posts.length, experiences: experiences.length, services: services.length, treks: treks.length, plans: plans.length },
-            itineraries: { total: plans.length },
+            experiences: { total: experiences.length },
             reviews: { written: reviewsWritten.length, received: reviewsReceived.length }
         };
 
@@ -565,8 +556,7 @@ export class ProfileService {
         return {
             user: userData,
             stats,
-            posts: { all: posts, experiences, services, treks, plans },
-            itineraries,
+            experiences,
             reviews: { written: reviewsWritten, received: user.role === 'host' ? reviewsReceived : [] },
             reviewStats: user.role === 'host' ? reviewStats : null
         };
@@ -643,7 +633,7 @@ export class ProfileService {
                         { $project: { _id: 1, title: 1, photos: { $slice: ['$photos', 1] }, price: 1, location: 1 } },
                         { $limit: 3 }
                     ],
-                    as: 'posts'
+                    as: 'experiences'
                 }
             },
             {
@@ -661,8 +651,8 @@ export class ProfileService {
                     },
                     averageRating: { $round: ['$averageRating', 1] },
                     reviewCount: 1,
-                    totalPosts: { $size: '$posts' },
-                    posts: 1
+                    totalExperiences: { $size: '$experiences' },
+                    experiences: 1
                 }
             }
         ]);

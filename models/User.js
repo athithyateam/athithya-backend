@@ -34,6 +34,6 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ role: 1 });
 userSchema.index({ role: 1, 'location.city': 1 });
 
-const User = mongoose.model("user", userSchema);
+const User = mongoose.models.user || mongoose.model("user", userSchema);
 
 module.exports = User;

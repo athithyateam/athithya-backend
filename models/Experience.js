@@ -1,19 +1,16 @@
 const mongoose = require("mongoose");
 
-const postSchema = new mongoose.Schema({
+const experienceSchema = new mongoose.Schema({
     user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'user',
-        required: true
+        required: true,
+        index: true
     },
     userRole: {
         type: String,
-        enum: ['guest', 'host', 'admin'],
-        required: true
-    },
-    postType: {
-        type: String,
-        enum: ['experience', 'service', 'plan', 'trek'],
+        enum: ['host', 'admin'],
+        default: 'host',
         required: true
     },
     title: {
@@ -52,7 +49,7 @@ const postSchema = new mongoose.Schema({
         state: { type: String, trim: true },
         country: { type: String, trim: true },
         address: { type: String, trim: true },
-        meetingPoint: { type: String, trim: true },  // Meeting point/landmark for services
+        meetingPoint: { type: String, trim: true },
         startPoint: { type: String, trim: true },
         endPoint: { type: String, trim: true },
         coordinates: {
@@ -65,7 +62,10 @@ const postSchema = new mongoose.Schema({
         enum: ['Adventure', 'Wildlife', 'Safari', 'Spiritual', 'Cultural', 'Beach', 'Mountain', 'Desert', 'Forest', 'Historical', 'Pilgrimage', 'Snow', 'Camping', 'Backpacking', 'Photography', 'Nature', 'Luxury', 'Budget', 'Trek', 'Rafting', 'Bungee jumping', 'Experience Guide', 'Paragliding', 'Flyboarding', 'Rock Climbing', 'Others', 'Other']
     }],
     season: {
-        type: mongoose.Schema.Types.Mixed
+        months: {
+            type: [String],
+            default: []
+        }
     },
     isFeatured: {
         type: Boolean,
@@ -79,19 +79,11 @@ const postSchema = new mongoose.Schema({
         period: { type: String, enum: ['night', 'hour', 'day', 'person', 'total', 'minute', 'session', 'group', 'trip', 'event'], default: 'person' }
     },
     amenities: [{
-        type: String  // WiFi, Pool, Parking, etc.
+        type: String
     }],
     capacity: {
         guests: { type: Number, min: 1 },
-        maxPeople: { type: Number, min: 1 },
-        bedrooms: { type: Number, min: 0 },
-        beds: { type: Number, min: 0 },
-        bathrooms: { type: Number, min: 0 }
-    },
-    plan: {
-        name: { type: String, trim: true },
-        latitude: { type: Number },
-        longitude: { type: Number }
+        maxPeople: { type: Number, min: 1 }
     },
     duration: {
         minutes: { type: Number, min: 0 },
@@ -109,12 +101,6 @@ const postSchema = new mongoose.Schema({
         average: { type: Number, min: 0, max: 5, default: 0 },
         count: { type: Number, default: 0 }
     },
-    reactions: [{
-        user: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
-        name: { type: String },
-        emoji: { type: String },
-        timestamp: { type: Date, default: Date.now }
-    }],
     privacyPolicy: [{ type: String }],
     status: {
         type: String,
@@ -169,29 +155,24 @@ const postSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
-    season: {
-        months: {
-            type: [String],
-            default: []
-        }
-    },
     approvedAt: {
         type: Date
     }
 }, { timestamps: true });
 
-postSchema.index({ user: 1, createdAt: -1 });
-postSchema.index({ postType: 1, status: 1 });
-postSchema.index({ 'location.city': 1, 'location.country': 1 });
-postSchema.index({ categories: 1 });
-postSchema.index({ isFeatured: 1, status: 1 });
-postSchema.index({ 'location.coordinates': '2dsphere' });
-postSchema.index({ clicks: -1, createdAt: -1 });
-postSchema.index({ bookingCount: -1, createdAt: -1 });
-postSchema.index({ savesCount: -1, createdAt: -1 });
-postSchema.index({ 'rating.average': -1, 'rating.count': -1, createdAt: -1 });
-postSchema.index({ approvedAt: -1 });
+experienceSchema.index({ user: 1, createdAt: -1 });
+experienceSchema.index({ status: 1, createdAt: -1 });
+experienceSchema.index({ 'location.city': 1, 'location.country': 1 });
+experienceSchema.index({ categories: 1 });
+experienceSchema.index({ isFeatured: 1, status: 1 });
+experienceSchema.index({ 'location.coordinates': '2dsphere' });
+experienceSchema.index({ clicks: -1, createdAt: -1 });
+experienceSchema.index({ bookingCount: -1, createdAt: -1 });
+experienceSchema.index({ savesCount: -1, createdAt: -1 });
+experienceSchema.index({ 'rating.average': -1, 'rating.count': -1, createdAt: -1 });
+experienceSchema.index({ approvedAt: -1 });
 
-const Post = mongoose.model("post", postSchema);
+// Ensure MongoDB uses the 'posts' collection for seamless continuity
+const Experience = mongoose.models.experience || mongoose.model("experience", experienceSchema, "posts");
 
-module.exports = Post;
+module.exports = Experience;

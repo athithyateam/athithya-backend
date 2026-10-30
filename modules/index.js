@@ -1,7 +1,6 @@
 const users = require("../routes/users");
-const posts = require("../routes/posts");
+const experiences = require("../routes/experiences");
 const reviews = require("../routes/reviews");
-const itineraries = require("../routes/itineraries");
 const search = require("../routes/search");
 const bookings = require("../routes/bookings");
 const groupBookings = require("../routes/groupBookings");
@@ -14,9 +13,8 @@ const adminHandler = require("../handlers/adminHandler");
 
 module.exports = {
   users,
-  posts,
+  experiences,
   reviews,
-  itineraries,
   search,
   bookings,
   groupBookings,

@@ -54,6 +54,6 @@ const hostDetailsSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-const HostDetails = mongoose.model("hostDetails", hostDetailsSchema);
+const HostDetails = mongoose.models.hostDetails || mongoose.model("hostDetails", hostDetailsSchema);
 
 module.exports = HostDetails;

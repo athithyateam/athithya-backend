@@ -17,7 +17,7 @@ const {
     updateExperience, 
     updateExperienceStatus, 
     deleteExperience 
-} = require("./admin/posts");
+} = require("./admin/experiences");
 const { 
     getAllBookings, 
     updateBooking, 

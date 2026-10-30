@@ -1,30 +1,31 @@
 const mongoose = require("mongoose");
-const { Review, User, Post } = require("../db/mongoose");
+const { Review, User, Experience } = require("../db/mongoose");
 
 /**
- * Helper to update Post ratings when reviews change
+ * Helper to update Experience ratings when reviews change
  */
-async function updatePostRating(postId) {
-    if (!postId) return;
+async function updateExperienceRating(experienceId) {
+    if (!experienceId) return;
     try {
-        const reviews = await Review.find({ post: postId });
+        const reviews = await Review.find({ $or: [{ experience: experienceId }, { post: experienceId }] });
         const count = reviews.length;
         const average = count > 0 
             ? Math.round((reviews.reduce((sum, r) => sum + r.rating, 0) / count) * 10) / 10 
             : 0;
             
-        await Post.findByIdAndUpdate(postId, {
+        await Experience.findByIdAndUpdate(experienceId, {
             'rating.average': average,
             'rating.count': count
         });
     } catch (err) {
-        console.error("Error updating post rating:", err);
+        console.error("Error updating experience rating:", err);
     }
 }
+const updatePostRating = updateExperienceRating;
 
 // CREATE REVIEW - Authenticated users can review hosts
 const createReview = async (req, res) => {
-    let validPostId = null;
+    let validExperienceId = null;
     try {
         if (req.user.role === 'host') {
             return res.status(400).json({
@@ -32,7 +33,7 @@ const createReview = async (req, res) => {
                 message: "Hosts cannot engage with another host's experience. Only guests can."
             });
         }
-        const { hostId, postId, rating, comment } = req.body;
+        const { hostId, experienceId, rating, comment } = req.body;
 
         // Validation
         if (!hostId || !rating || !mongoose.Types.ObjectId.isValid(hostId)) {
@@ -75,40 +76,41 @@ const createReview = async (req, res) => {
             });
         }
 
-        // Normalize postId (handle empty string or invalid ObjectId safely)
-        if (postId && typeof postId === 'string' && postId.trim() !== '' && mongoose.Types.ObjectId.isValid(postId.trim())) {
-            validPostId = postId.trim();
+        // Normalize experienceId (handle empty string or invalid ObjectId safely)
+        const rawTargetId = experienceId;
+        if (rawTargetId && typeof rawTargetId === 'string' && rawTargetId.trim() !== '' && mongoose.Types.ObjectId.isValid(rawTargetId.trim())) {
+            validExperienceId = rawTargetId.trim();
         }
 
-        // Check if post exists if provided
-        if (validPostId) {
-            const post = await Post.findById(validPostId);
-            if (!post) {
+        // Check if experience exists if provided
+        if (validExperienceId) {
+            const experience = await Experience.findById(validExperienceId);
+            if (!experience) {
                 return res.status(404).json({
                     success: false,
-                    message: "Post not found"
+                    message: "Experience not found"
                 });
             }
 
-            // Check if the post belongs to the host
-            if (post.user.toString() !== hostId) {
+            // Check if the experience belongs to the host
+            if (experience.user.toString() !== hostId) {
                 return res.status(400).json({
                     success: false,
-                    message: "This post does not belong to the specified host"
+                    message: "This experience does not belong to the specified host"
                 });
             }
 
             // Verify that the guest has booked and completed this specific experience before reviewing
             const Booking = require("../models/Booking");
             const hasCompleted = await Booking.findOne({
-                post: validPostId,
+                $or: [{ experience: validExperienceId }, { post: validExperienceId }],
                 guest: req.user.userId,
                 status: 'completed'
             });
 
             if (!hasCompleted) {
                 const hasAny = await Booking.findOne({
-                    post: validPostId,
+                    $or: [{ experience: validExperienceId }, { post: validExperienceId }],
                     guest: req.user.userId
                 });
 
@@ -126,14 +128,22 @@ const createReview = async (req, res) => {
             }
         }
 
-        // Check if user already reviewed this host for this specific post (or generic host review)
-        const query = {
-            host: hostId,
-            reviewer: req.user.userId,
-            post: validPostId
-        };
-
-        let review = await Review.findOne(query);
+        // Check if user already reviewed this host for this specific experience (or generic host review)
+        let review = null;
+        if (validExperienceId) {
+            review = await Review.findOne({
+                host: hostId,
+                reviewer: req.user.userId,
+                $or: [{ experience: validExperienceId }, { post: validExperienceId }]
+            });
+        } else {
+            review = await Review.findOne({
+                host: hostId,
+                reviewer: req.user.userId,
+                experience: null,
+                post: null
+            });
+        }
         const isUpdate = !!review;
 
         if (review) {
@@ -144,7 +154,10 @@ const createReview = async (req, res) => {
         } else {
             // Create new review
             review = await Review.create({
-                ...query,
+                host: hostId,
+                reviewer: req.user.userId,
+                experience: validExperienceId,
+                post: validExperienceId,
                 reviewerRole: req.user.role,
                 rating: ratingNum,
                 comment: comment || ""
@@ -154,7 +167,8 @@ const createReview = async (req, res) => {
         const populatedReview = await Review.findById(review._id)
             .populate('reviewer', 'firstname lastname email role avatar')
             .populate('host', 'firstname lastname email role avatar')
-            .populate('post', 'title postType');
+            .populate('experience', 'title photos location price')
+            .populate('post', 'title photos location price');
 
         return res.status(isUpdate ? 200 : 201).json({
             success: true,
@@ -165,8 +179,8 @@ const createReview = async (req, res) => {
         console.error("Submit review error:", error);
         return res.status(500).json({ success: false, message: "Error processing your rating" });
     } finally {
-        if (validPostId) {
-            updatePostRating(validPostId);
+        if (validExperienceId) {
+            updateExperienceRating(validExperienceId);
         }
     }
 };
@@ -185,11 +199,11 @@ const getHostReviews = async (req, res) => {
         } = req.query;
 
         const hostObjectId = new mongoose.Types.ObjectId(req.params.hostId);
-        const hostPosts = await Post.find({ user: hostObjectId }).select('_id');
-        const hostPostIds = hostPosts.map(p => p._id);
+        const hostExperiences = await Experience.find({ user: hostObjectId }).select('_id');
+        const hostExpIds = hostExperiences.map(p => p._id);
 
-        const baseMatch = hostPostIds.length > 0
-            ? { $or: [{ host: hostObjectId }, { post: { $in: hostPostIds } }] }
+        const baseMatch = hostExpIds.length > 0
+            ? { $or: [{ host: hostObjectId }, { experience: { $in: hostExpIds } }, { post: { $in: hostExpIds } }] }
             : { host: hostObjectId };
 
         const filter = { ...baseMatch };
@@ -203,7 +217,8 @@ const getHostReviews = async (req, res) => {
 
         let reviews = await Review.find(filter)
             .populate('reviewer', 'firstname lastname email role avatar')
-            .populate('post', 'title postType')
+            .populate('experience', 'title photos location price')
+            .populate('post', 'title photos location price')
             .sort({ createdAt: -1 })
             .limit(Number(limit))
             .skip(skip);
@@ -289,7 +304,8 @@ const getReviewerReviews = async (req, res) => {
 
         const reviews = await Review.find({ reviewer: req.params.reviewerId })
             .populate('host', 'firstname lastname email role avatar')
-            .populate('post', 'title postType')
+            .populate('experience', 'title photos location price')
+            .populate('post', 'title photos location price')
             .sort({ createdAt: -1 })
             .limit(Number(limit))
             .skip(skip);
@@ -315,7 +331,8 @@ const getMyReviews = async (req, res) => {
     try {
         const reviews = await Review.find({ reviewer: req.user.userId })
             .populate('host', 'firstname lastname email role avatar')
-            .populate('post', 'title postType')
+            .populate('experience', 'title photos location price')
+            .populate('post', 'title photos location price')
             .sort({ createdAt: -1 });
 
         return res.status(200).json({
@@ -355,7 +372,8 @@ const getReceivedReviews = async (req, res) => {
 
         const reviews = await Review.find(filter)
             .populate('reviewer', 'firstname lastname email role avatar')
-            .populate('post', 'title postType')
+            .populate('experience', 'title photos location price')
+            .populate('post', 'title photos location price')
             .sort({ createdAt: -1 })
             .limit(Number(limit))
             .skip(skip);
@@ -376,7 +394,7 @@ const getReceivedReviews = async (req, res) => {
     }
 };
 
-// CHECK ELIGIBILITY - Check if authenticated user is allowed to review a post
+// CHECK ELIGIBILITY - Check if authenticated user is allowed to review an experience
 const checkReviewEligibility = async (req, res) => {
     try {
         if (req.user.role === 'host') {
@@ -387,15 +405,15 @@ const checkReviewEligibility = async (req, res) => {
                 message: "Hosts cannot engage with another host's experience. Only guests can."
             });
         }
-        const { postId } = req.query;
+        const rawTargetId = req.query.experienceId;
 
-        if (!postId) {
-            return res.status(400).json({ success: false, message: "Post ID is required" });
+        if (!rawTargetId) {
+            return res.status(400).json({ success: false, message: "Experience ID is required" });
         }
 
         const Booking = require("../models/Booking");
         const hasCompleted = await Booking.findOne({
-            post: postId,
+            experience: rawTargetId,
             guest: req.user.userId,
             status: 'completed'
         });
@@ -405,7 +423,7 @@ const checkReviewEligibility = async (req, res) => {
         }
 
         const hasAny = await Booking.findOne({
-            post: postId,
+            experience: rawTargetId,
             guest: req.user.userId
         });
 
@@ -436,15 +454,14 @@ const getLatestReviews = async (req, res) => {
     try {
         const limitNum = Math.min(Number(req.query.limit || 20), 50);
 
-        // Fetch candidate reviews with non-empty written comments (any rating 1 to 5)
-        // Sorted by newest first (createdAt: -1)
         const candidateReviews = await Review.find({ 
             comment: { $exists: true, $ne: "" },
             rating: { $gte: 1 }
         })
             .populate('reviewer', 'firstname lastname name email role avatar')
             .populate('host', 'firstname lastname name email role avatar')
-            .populate('post', 'title postType photos location price')
+            .populate('experience', 'title photos location price')
+            .populate('post', 'title photos location price')
             .sort({ createdAt: -1 })
             .limit(limitNum * 3);
 
@@ -470,7 +487,8 @@ const getReviewById = async (req, res) => {
         const review = await Review.findById(req.params.id)
             .populate('reviewer', 'firstname lastname email role avatar')
             .populate('host', 'firstname lastname email role avatar')
-            .populate('post', 'title postType');
+            .populate('experience', 'title photos location price')
+            .populate('post', 'title photos location price');
 
         if (!review) {
             return res.status(404).json({ success: false, message: "Review not found" });
@@ -521,7 +539,8 @@ const updateReview = async (req, res) => {
         const updatedReview = await Review.findById(review._id)
             .populate('reviewer', 'firstname lastname email role avatar')
             .populate('host', 'firstname lastname email role avatar')
-            .populate('post', 'title postType');
+            .populate('experience', 'title photos location price')
+            .populate('post', 'title photos location price');
 
         return res.status(200).json({
             success: true,
@@ -532,8 +551,9 @@ const updateReview = async (req, res) => {
         console.error("Update review error:", error);
         return res.status(500).json({ success: false, message: "Error updating review" });
     } finally {
-        if (review && review.post) {
-            updatePostRating(review.post);
+        const targetExp = review?.experience || review?.post;
+        if (targetExp) {
+            updateExperienceRating(targetExp);
         }
     }
 };
@@ -566,8 +586,9 @@ const deleteReview = async (req, res) => {
         console.error("Delete review error:", error);
         return res.status(500).json({ success: false, message: "Error deleting review" });
     } finally {
-        if (review && review.post) {
-            updatePostRating(review.post);
+        const targetExp = review?.experience || review?.post;
+        if (targetExp) {
+            updateExperienceRating(targetExp);
         }
     }
 };
@@ -583,5 +604,6 @@ module.exports = {
     getReviewById,
     updateReview,
     deleteReview,
+    updateExperienceRating,
     updatePostRating
 };

@@ -6,7 +6,7 @@ exports.getAllBookings = async (req, res) => {
         const limit = parseInt(req.query.limit) || 50;
         const search = req.query.search || "";
         
-        const { User, Post } = require("../../db/mongoose");
+        const { User, Experience } = require("../../db/mongoose");
         let query = { isInviteBooking: { $ne: true } };
 
         if (search) {
@@ -18,7 +18,7 @@ exports.getAllBookings = async (req, res) => {
                 ]
             }).select('_id');
 
-            const postIds = await Post.find({
+            const experienceIds = await Experience.find({
                 title: { $regex: search, $options: "i" }
             }).select('_id');
 
@@ -27,8 +27,8 @@ exports.getAllBookings = async (req, res) => {
                 $or: [
                     { guest: { $in: userIds } },
                     { host: { $in: userIds } },
-                    { post: { $in: postIds } },
-                    { postTitle: { $regex: search, $options: "i" } }
+                    { experience: { $in: experienceIds } },
+                    { experienceTitle: { $regex: search, $options: "i" } }
                 ]
             };
         }
@@ -39,7 +39,7 @@ exports.getAllBookings = async (req, res) => {
         const bookings = await Booking.find(query)
             .populate("guest", "firstname lastname email avatar")
             .populate("host", "firstname lastname email avatar")
-            .populate("post", "title photos")
+            .populate("experience", "title photos")
             .populate({
                 path: "parentBookingId",
                 populate: { path: "guest", select: "firstname lastname email" }
@@ -71,6 +71,7 @@ exports.updateBooking = async (req, res) => {
         const booking = await Booking.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true, runValidators: true })
             .populate("guest", "firstname lastname avatar email")
             .populate("host", "firstname lastname avatar email")
+            .populate("experience", "title photos")
             .populate("post", "title photos")
             .populate({
                 path: "parentBookingId",

@@ -14,7 +14,7 @@ const notificationSchema = new mongoose.Schema({
     read: { type: Boolean, default: false },
     status: { type: String, default: 'pending' },
     metadata: {
-        postId: { type: mongoose.Schema.Types.ObjectId, ref: 'post' },
+        experienceId: { type: mongoose.Schema.Types.ObjectId, ref: 'experience' },
         userId: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
         bookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'booking' },
         groupBookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'groupBooking' }
@@ -23,6 +23,6 @@ const notificationSchema = new mongoose.Schema({
 
 notificationSchema.index({ recipient: 1, createdAt: -1 });
 
-const Notification = mongoose.model("notification", notificationSchema);
+const Notification = mongoose.models.notification || mongoose.model("notification", notificationSchema);
 
 module.exports = Notification;

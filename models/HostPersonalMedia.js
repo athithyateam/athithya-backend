@@ -34,6 +34,6 @@ const hostPersonalMediaSchema = new mongoose.Schema({
 
 hostPersonalMediaSchema.index({ user: 1, isPinned: -1, createdAt: -1 });
 
-const HostPersonalMedia = mongoose.model("hostPersonalMedia", hostPersonalMediaSchema);
+const HostPersonalMedia = mongoose.models.hostPersonalMedia || mongoose.model("hostPersonalMedia", hostPersonalMediaSchema);
 
 module.exports = HostPersonalMedia;

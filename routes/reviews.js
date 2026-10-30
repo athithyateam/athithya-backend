@@ -19,7 +19,7 @@ reviewRouter.get("/my/reviews", checkAuth, reviewHandler.getMyReviews);
 // GET REVIEWS RECEIVED BY ME (for hosts) - Get reviews received by authenticated user
 reviewRouter.get("/received", checkAuth, reviewHandler.getReceivedReviews);
 
-// CHECK ELIGIBILITY - Check if authenticated user is allowed to review a post
+// CHECK ELIGIBILITY - Check if authenticated user is allowed to review an experience
 reviewRouter.get("/check-eligibility", checkAuth, reviewHandler.checkReviewEligibility);
 
 // GET LATEST PUBLIC REVIEWS (For Homepage Guest Reviews section - all written reviews sorted by latest)

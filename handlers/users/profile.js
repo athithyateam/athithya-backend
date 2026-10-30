@@ -1,4 +1,4 @@
-const { User, HostDetails, HostAuditLog, Post, Review, Booking, Notification, CommunityPost, Conversation, Message, Friendship, FriendRequest, SavedPost, HostPinnedExperienceMedia, WishlistSchedule } = require("../../db/mongoose");
+const { User, HostDetails, HostAuditLog, Experience, Review, Booking, Notification, Conversation, Message, Friendship, FriendRequest, SavedExperience, HostPinnedExperienceMedia, WishlistSchedule } = require("../../db/mongoose");
 const { deleteFromS3 } = require("../../services/storageService");
 const { profileService } = require("../../services/users/profileService");
 
@@ -220,83 +220,68 @@ exports.deleteMyAccount = async (req, res) => {
             }
         }
 
-        // 3. Delete all Posts and their media from S3
-        const userPosts = await Post.find({ user: userId });
-        for (const post of userPosts) {
+        // 3. Delete all Experiences and their media from S3
+        const userExperiences = await Experience.find({ user: userId });
+        for (const exp of userExperiences) {
             // Cleanup Photos
-            if (post.photos && post.photos.length > 0) {
-                for (const img of post.photos) {
+            if (exp.photos && exp.photos.length > 0) {
+                for (const img of exp.photos) {
                     if (img.public_id) {
                         try { await deleteFromS3(img.public_id); } catch (err) {}
                     }
                 }
             }
             // Cleanup Videos
-            if (post.videos && post.videos.length > 0) {
-                for (const vid of post.videos) {
+            if (exp.videos && exp.videos.length > 0) {
+                for (const vid of exp.videos) {
                     if (vid.public_id) {
                         try { await deleteFromS3(vid.public_id); } catch (err) {}
                     }
                 }
             }
         }
-        await Post.deleteMany({ user: userId });
+        await Experience.deleteMany({ user: userId });
 
-        // 4. Delete all Community Posts and their media
-        const userCommunityPosts = await CommunityPost.find({ user: userId });
-        for (const cp of userCommunityPosts) {
-            if (cp.media && cp.media.length > 0) {
-                for (const m of cp.media) {
-                    if (m.public_id) {
-                        try { await deleteFromS3(m.public_id); } catch (err) {}
-                    }
-                }
-            }
-        }
-        await CommunityPost.deleteMany({ user: userId });
-
-        // 5. Itineraries are deleted as part of Post.deleteMany
-
-        // 6. Delete all Bookings (where user is host or guest)
+        // 5. Delete all Bookings (where user is host or guest)
         await Booking.deleteMany({ $or: [{ guest: userId }, { host: userId }] });
 
-        // 7. Delete all Reviews (written by user or about user) and recalculate post ratings
-        const userSubmittedReviews = await Review.find({ reviewer: userId, post: { $ne: null } });
-        const affectedPostIds = [...new Set(userSubmittedReviews.map(r => r.post?.toString()).filter(Boolean))];
+        // 6. Delete all Reviews (written by user or about user) and recalculate experience ratings
+        const userSubmittedReviews = await Review.find({ reviewer: userId, $or: [{ experience: { $ne: null } }, { post: { $ne: null } }] });
+        const affectedExpIds = [...new Set(userSubmittedReviews.map(r => (r.experience || r.post)?.toString()).filter(Boolean))];
 
         await Review.deleteMany({ $or: [{ reviewer: userId }, { host: userId }] });
 
-        for (const postId of affectedPostIds) {
+        for (const expId of affectedExpIds) {
             try {
-                const remainingReviews = await Review.find({ post: postId });
+                const remainingReviews = await Review.find({ $or: [{ experience: expId }, { post: expId }] });
                 const count = remainingReviews.length;
                 const average = count > 0 
                     ? Math.round((remainingReviews.reduce((sum, r) => sum + r.rating, 0) / count) * 10) / 10 
                     : 0;
-                await Post.findByIdAndUpdate(postId, {
+                await Experience.findByIdAndUpdate(expId, {
                     'rating.average': average,
                     'rating.count': count
                 });
             } catch (err) {
-                console.error("Error recalculating post rating on account deletion:", err);
+                console.error("Error recalculating experience rating on account deletion:", err);
             }
         }
 
-        // 8. Delete all Notifications
+        // 7. Delete all Notifications
         await Notification.deleteMany({ $or: [{ recipient: userId }, { sender: userId }] });
 
-        // 9. Delete all Conversations and their Messages
+        // 8. Delete all Conversations and their Messages
         const userConversations = await Conversation.find({ participants: userId });
         for (const conv of userConversations) {
             await Message.deleteMany({ conversationId: conv._id });
         }
         await Conversation.deleteMany({ participants: userId });
 
-        // 10. Clean up user's social connections, requests, bookmarks, pins, wishlist schedules, and host records
+        // 9. Clean up user's social connections, requests, bookmarks, pins, wishlist schedules, and host records
         await Promise.all([
             Friendship.deleteMany({ $or: [{ user: userId }, { friend: userId }] }),
             FriendRequest.deleteMany({ $or: [{ sender: userId }, { recipient: userId }] }),
-            SavedPost.deleteMany({ user: userId }),
+            SavedExperience.deleteMany({ user: userId }),
             HostPinnedExperienceMedia.deleteMany({ user: userId }),
             WishlistSchedule.deleteMany({ user: userId }),
             HostDetails.deleteOne({ user: userId }),

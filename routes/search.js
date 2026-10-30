@@ -3,7 +3,7 @@ const searchHandler = require("../handlers/searchHandler");
 
 const searchRouter = express.Router();
 
-// SEARCH API - Search across all posts and people
+// SEARCH API - Search across all experiences and people
 searchRouter.get("/", searchHandler.searchAll);
 
 // ADVANCED SEARCH - More detailed search with multiple filters
@@ -12,7 +12,7 @@ searchRouter.post("/advanced", searchHandler.advancedSearch);
 // GET SEARCH SUGGESTIONS - Quick autocomplete suggestions
 searchRouter.get("/suggestions", searchHandler.getSearchSuggestions);
 
-// GET BY LOCATION - Get all itineraries and experiences by location
+// GET BY LOCATION - Get all experiences by location
 searchRouter.get("/by-location", searchHandler.searchByLocation);
 
 // GEODECODING PROXY - Reverse

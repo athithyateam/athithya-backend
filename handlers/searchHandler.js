@@ -1,4 +1,4 @@
-const { Post, User } = require("../db/mongoose");
+const { Experience, User } = require("../db/mongoose");
 
 const escapeRegex = (text) => {
     if (!text || typeof text !== 'string') return '';
@@ -10,7 +10,7 @@ const searchAll = async (req, res) => {
     try {
         const {
             q, // search query
-            type = "all", // all, itinerary, experience, trek, service, people
+            type = "all", // all, experience, trek, service, people
             location, // city or country filter
             city, // optional city alias
             difficulty, // difficulty level for treks
@@ -41,15 +41,13 @@ const searchAll = async (req, res) => {
         else if (searchType === "guests" || searchType === "guest") searchType = "guest";
         else if (searchType === "people") searchType = "people";
 
-        // --- 1. SEARCH POSTS ---
-        if (searchType === "all" || ["itinerary", "experience", "trek", "service"].includes(searchType)) {
+        // --- 1. SEARCH EXPERIENCES ---
+        if (searchType === "all" || ["experience", "trek", "service"].includes(searchType)) {
             let postQuery = { status: "active" };
 
-            if (searchType === "itinerary") postQuery.postType = "plan";
-            else if (searchType === "experience") postQuery.postType = { $in: ["experience", "plan", "trek", "service"] };
-            else if (searchType === "trek") postQuery.postType = "trek";
-            else if (searchType === "service") postQuery.postType = "service";
-            else if (searchType === "all") postQuery.postType = { $in: ["plan", "experience", "trek", "service"] };
+            if (searchType === "trek") {
+                postQuery.categories = { $in: ["Trek", "Trekking", "trek", "trekking"] };
+            }
 
             const andConditions = [];
 
@@ -105,15 +103,15 @@ const searchAll = async (req, res) => {
             else if (sortBy === "price") sortOptions["price.perPerson"] = sortOrder === "asc" ? 1 : -1;
             else sortOptions[sortBy] = sortOrder === "asc" ? 1 : -1;
 
-            postResults = await Post.find(postQuery)
-                .select("title subtitle postType photos location price duration difficulty categories discounts isFeatured status rating bookingCount clicks user createdAt")
+            postResults = await Experience.find(postQuery)
+                .select("title subtitle photos location price duration difficulty categories discounts isFeatured status rating bookingCount clicks user createdAt")
                 .populate("user", "firstname lastname email avatar role")
                 .sort(sortOptions)
                 .skip(skip)
                 .limit(limitNum)
                 .lean();
 
-            totalPostCount = await Post.countDocuments(postQuery);
+            totalPostCount = await Experience.countDocuments(postQuery);
 
             postResults = postResults.map(item => ({ ...item, rating: item.rating?.average || 0 }));
         }
@@ -181,6 +179,7 @@ const searchAll = async (req, res) => {
             data: {
                 results: combinedResults,
                 people: userResults,
+                experiences: postResults,
                 posts: postResults,
                 pagination: {
                     currentPage: pageNum,
@@ -211,12 +210,13 @@ const advancedSearch = async (req, res) => {
     try {
         const {
             searchText,
-            postTypes = ["plan", "experience"], // array of types
+            experienceTypes,
+            postTypes = ["experience", "trek", "service"], // array of types
             locations = [], // array of cities/countries
             difficulties = [], // array of difficulty levels
             categories = [], // array of categories
             priceRange = {},
-            durationRange = {}, // for itineraries
+            durationRange = {}, // duration range in days
             amenities = [], // array of amenities
             rating = null, // minimum rating
             sortBy = "createdAt",
@@ -225,12 +225,14 @@ const advancedSearch = async (req, res) => {
             limit = 20
         } = req.body;
 
+        const effectiveTypes = experienceTypes || ["experience", "trek", "service"];
+
         // Build query
         let query = { status: "active" };
 
-        // Filter by post types
-        if (postTypes && postTypes.length > 0) {
-            query.postType = { $in: postTypes };
+        // Filter by trek if specifically requested
+        if (effectiveTypes && effectiveTypes.length > 0 && effectiveTypes.includes("trek") && !effectiveTypes.includes("experience") && !effectiveTypes.includes("all")) {
+            query.categories = { $in: ["Trek", "Trekking", "trek", "trekking"] };
         }
 
         // Text search
@@ -274,7 +276,7 @@ const advancedSearch = async (req, res) => {
             }
         }
 
-        // Duration range (for itineraries)
+        // Duration range (in days)
         if (durationRange.minDays !== undefined || durationRange.maxDays !== undefined) {
             query["duration.days"] = {};
             if (durationRange.minDays !== undefined) {
@@ -312,14 +314,14 @@ const advancedSearch = async (req, res) => {
 
         // Execute query
         const [results, totalCount] = await Promise.all([
-            Post.find(query)
-                .select("title subtitle postType photos location price duration difficulty categories discounts isFeatured status rating bookingCount clicks user createdAt")
+            Experience.find(query)
+                .select("title subtitle photos location price duration difficulty categories discounts isFeatured status rating bookingCount clicks user createdAt")
                 .populate("user", "firstname lastname email avatar role")
                 .sort(sortOptions)
                 .skip(skip)
                 .limit(limitNum)
                 .lean(),
-            Post.countDocuments(query)
+            Experience.countDocuments(query)
         ]);
 
         // Calculate pagination
@@ -366,15 +368,14 @@ const getSearchSuggestions = async (req, res) => {
         const escapedQ = escapeRegex(q);
 
         // Get title suggestions
-        const suggestions = await Post.find({
+        const suggestions = await Experience.find({
             status: "active",
-            postType: { $in: ["plan", "experience"] },
             $or: [
                 { title: { $regex: escapedQ, $options: "i" } },
                 { "location.city": { $regex: escapedQ, $options: "i" } }
             ]
         })
-            .select("title location.city postType")
+            .select("title location.city")
             .limit(10)
             .lean();
 
@@ -382,7 +383,7 @@ const getSearchSuggestions = async (req, res) => {
         const formatted = suggestions.map(item => ({
             text: item.title,
             location: item.location?.city || "",
-            type: item.postType === "plan" ? "itinerary" : "experience"
+            type: "experience"
         }));
 
         res.status(200).json({
@@ -402,12 +403,12 @@ const getSearchSuggestions = async (req, res) => {
     }
 };
 
-// GET BY LOCATION - Get all itineraries and experiences by location
+// GET BY LOCATION - Get all experiences by location
 const searchByLocation = async (req, res) => {
     try {
         const {
             location,
-            type = "all", // all, itinerary, experience
+            type = "all", // all, experience, trek, service
             sortBy = "createdAt",
             sortOrder = "desc",
             page = 1,
@@ -434,20 +435,6 @@ const searchByLocation = async (req, res) => {
             ]
         };
 
-        // Filter by type
-        if (type === "itinerary") {
-            query.postType = "plan";
-        } else if (type === "experience") {
-            query.postType = "experience";
-        } else if (type === "all") {
-            query.postType = { $in: ["plan", "experience"] };
-        } else {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid type parameter. Must be 'all', 'itinerary', or 'experience'"
-            });
-        }
-
         // Sorting
         let sortOptions = {};
         if (sortBy === "rating") {
@@ -465,19 +452,15 @@ const searchByLocation = async (req, res) => {
 
         // Execute query
         const [results, totalCount] = await Promise.all([
-            Post.find(query)
-                .select("title subtitle postType photos location price duration difficulty categories discounts isFeatured status rating bookingCount clicks user createdAt")
+            Experience.find(query)
+                .select("title subtitle photos location price duration difficulty categories discounts isFeatured status rating bookingCount clicks user createdAt")
                 .populate("user", "firstname lastname email avatar role")
                 .sort(sortOptions)
                 .skip(skip)
                 .limit(limitNum)
                 .lean(),
-            Post.countDocuments(query)
+            Experience.countDocuments(query)
         ]);
-
-        // Group results by type for better organization
-        const itineraries = results.filter(item => item.postType === "plan");
-        const experiences = results.filter(item => item.postType === "experience");
 
         // Calculate pagination
         const totalPages = Math.ceil(totalCount / limitNum);
@@ -489,14 +472,10 @@ const searchByLocation = async (req, res) => {
                 location: location,
                 summary: {
                     total: totalCount,
-                    itineraries: itineraries.length,
-                    experiences: experiences.length
+                    experiences: results.length
                 },
-                results: {
-                    all: results,
-                    itineraries: itineraries,
-                    experiences: experiences
-                },
+                results: results,
+                experiences: results,
                 pagination: {
                     currentPage: pageNum,
                     totalPages,

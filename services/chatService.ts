@@ -11,7 +11,6 @@ import {
     SendMessagePayload,
     CreateGroupPayload,
     UpdateGroupPayload,
-    ChatItineraryPin,
     ChatActivityMetrics,
     ChatSessionSummary
 } from "./chat/chatHelper";
@@ -21,7 +20,6 @@ export {
     SendMessagePayload,
     CreateGroupPayload,
     UpdateGroupPayload,
-    ChatItineraryPin,
     ChatActivityMetrics,
     ChatSessionSummary
 };
@@ -276,20 +274,6 @@ export class ChatService {
         await this.messageModel.findByIdAndDelete(messageId);
     }
 
-    public async updateItinerary(conversationId: string, userId: string, action: "add" | "remove", pin: ChatItineraryPin): Promise<any[]> {
-        const conv = await this.conversationModel.findById(conversationId);
-        if (!conv) throw Object.assign(new Error("Conversation not found"), { statusCode: 404 });
-        if (!conv.participants.some((p: any) => p.toString() === userId.toString())) throw Object.assign(new Error("Unauthorized access"), { statusCode: 403 });
-
-        if (action === "add") conv.itinerary.push({ ...pin, addedBy: userId });
-        else if (action === "remove") conv.itinerary = conv.itinerary.filter((p: any) => p.lat !== pin.lat || p.lng !== pin.lng);
-
-        await conv.save();
-        await conv.populate("itinerary.postId", "title photos price rating");
-        conv.participants.forEach((p: any) => emitChatRealtime(String(p), "itinerary_updated", { conversationId, itinerary: conv.itinerary }));
-        return conv.itinerary;
-    }
-
     // ==================== AUTOMATED WORKFLOWS ====================
 
     private async sendAutomatedDirectMessage(sender: any, recipient: any, text: string): Promise<any> {
@@ -329,8 +313,8 @@ export class ChatService {
             ]);
             if (!guest || !host) return;
 
-            const postTitle = booking.postTitle || booking.post?.title || "Experience";
-            const text = `Dear ${guest.firstname || "Guest"}, thank you for booking my experience "${postTitle}"! I am ${host.firstname || "Host"}, your host for this journey. If you have any queries or details to discuss before we begin, feel free to message me here!`;
+            const experienceTitle = booking.experienceTitle || booking.experience?.title || "Experience";
+            const text = `Dear ${guest.firstname || "Guest"}, thank you for booking my experience "${experienceTitle}"! I am ${host.firstname || "Host"}, your host for this journey. If you have any queries or details to discuss before we begin, feel free to message me here!`;
             await this.sendAutomatedDirectMessage(host, guest, text);
         } catch (err) {
             console.error("Error in sendHostBookingWelcome:", err);
@@ -454,8 +438,11 @@ export class ChatService {
                         { host: hostUser._id, guest: guestUser._id },
                         { host: guestUser._id, guest: hostUser._id }
                     ]
-                }).select("postTitle startDate numberOfPeople totalAmount status").sort({ createdAt: -1 }).lean();
-                if (b) bookingInfo = { id: b._id, postTitle: b.postTitle || "Experience", startDate: b.startDate, numberOfPeople: b.numberOfPeople, totalAmount: b.totalAmount, status: b.status };
+                }).select("experienceTitle startDate numberOfPeople totalAmount status").sort({ createdAt: -1 }).lean();
+                if (b) {
+                    const expTitle = b.experienceTitle || "Experience";
+                    bookingInfo = { id: b._id, experienceTitle: expTitle, startDate: b.startDate, numberOfPeople: b.numberOfPeople, totalAmount: b.totalAmount, status: b.status };
+                }
             }
 
             return {

@@ -22,7 +22,7 @@ export interface SendMessagePayload {
         lat: number;
         lng: number;
         cityName?: string;
-        postId?: string;
+        experienceId?: string;
     };
     attachments?: Array<{
         url: string;
@@ -40,13 +40,6 @@ export interface CreateGroupPayload {
 export interface UpdateGroupPayload {
     name?: string;
     description?: string;
-}
-
-export interface ChatItineraryPin {
-    lat: number;
-    lng: number;
-    cityName?: string;
-    postId?: string;
 }
 
 export interface ChatActivityMetrics {

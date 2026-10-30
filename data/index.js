@@ -1,6 +1,5 @@
 const mongoose = require("../db/mongoose");
 const Booking = require("../models/Booking");
-const CommunityPost = require("../models/CommunityPost");
 const Conversation = require("../models/Conversation");
 const FriendRequest = require("../models/FriendRequest");
 const Friendship = require("../models/Friendship");
@@ -12,9 +11,9 @@ const HostPinnedExperienceMedia = require("../models/HostPinnedExperienceMedia")
 const Message = require("../models/Message");
 const Notification = require("../models/Notification");
 const OTP = require("../models/OTP");
-const Post = require("../models/Post");
+const Experience = require("../models/Experience");
 const Review = require("../models/Review");
-const SavedPost = require("../models/SavedPost");
+const SavedExperience = require("../models/SavedExperience");
 const User = require("../models/User");
 const WishlistSchedule = require("../models/WishlistSchedule");
 
@@ -22,7 +21,6 @@ module.exports = {
   ...mongoose,
   models: {
     Booking,
-    CommunityPost,
     Conversation,
     FriendRequest,
     Friendship,
@@ -34,9 +32,9 @@ module.exports = {
     Message,
     Notification,
     OTP,
-    Post,
+    Experience,
     Review,
-    SavedPost,
+    SavedExperience,
     User,
     WishlistSchedule,
   },

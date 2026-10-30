@@ -1,9 +1,9 @@
-const { User, Post, Booking, Review } = require("../../db/mongoose");
+const { User, Experience, Booking, Review } = require("../../db/mongoose");
 
 exports.getAdminStats = async (req, res) => {
     try {
         const totalUsers = await User.countDocuments();
-        const totalPosts = await Post.countDocuments({ status: "active" });
+        const totalExperiences = await Experience.countDocuments({ status: "active" });
         const totalBookings = await Booking.countDocuments({ status: { $nin: ["cancelled", "rejected"] } });
         const totalReviews = await Review.countDocuments();
 
@@ -11,16 +11,12 @@ exports.getAdminStats = async (req, res) => {
             { $group: { _id: "$role", count: { $sum: 1 } } }
         ]);
 
-        const postCounts = await Post.aggregate([
-            { $group: { _id: "$postType", count: { $sum: 1 } } }
-        ]);
-
-        const categoryCounts = await Post.aggregate([
+        const categoryCounts = await Experience.aggregate([
             { $unwind: "$categories" },
             { $group: { _id: "$categories", count: { $sum: 1 } } }
         ]);
 
-        const hostCategoryCounts = await Post.aggregate([
+        const hostCategoryCounts = await Experience.aggregate([
             { $unwind: "$categories" },
             { $group: { 
                 _id: { user: "$user", category: "$categories" }, 
@@ -49,22 +45,20 @@ exports.getAdminStats = async (req, res) => {
         ]);
 
         const recentUsers = await User.find().select("firstname lastname email role createdAt avatar").sort({ createdAt: -1 }).limit(5);
-        const recentPosts = await Post.find().populate("user", "firstname lastname avatar").sort({ createdAt: -1 }).limit(5);
-        const recentBookings = await Booking.find().populate("guest", "firstname lastname avatar").populate("post", "title").sort({ createdAt: -1 }).limit(5);
+        const recentExperiences = await Experience.find().populate("user", "firstname lastname avatar").sort({ createdAt: -1 }).limit(5);
+        const recentBookings = await Booking.find().populate("guest", "firstname lastname avatar").populate("experience", "title").sort({ createdAt: -1 }).limit(5);
 
         const statistics = {
             totalUsers,
-            totalPosts,
+            totalExperiences,
             totalBookings,
             totalReviews,
             roles: roleCounts.reduce((acc, curr) => { acc[curr._id] = curr.count; return acc; }, {}),
-            postsByType: postCounts.reduce((acc, curr) => { acc[curr._id] = curr.count; return acc; }, {}),
             categoryStats: categoryCounts.reduce((acc, curr) => { acc[curr._id] = curr.count; return acc; }, {}),
             hostCategoryStats: hostCategoryCounts,
             activities: {
                 recentUsers,
-                recentPosts,
-                recentExperiences: recentPosts,
+                recentExperiences,
                 recentBookings
             }
         };

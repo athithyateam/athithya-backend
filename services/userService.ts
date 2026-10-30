@@ -67,16 +67,16 @@ export class UserService {
         return this.profileService.getUserLocation(userId);
     }
 
-    public async getSavedPosts(userId: string): Promise<any[]> {
-        return this.profileService.getSavedPosts(userId);
+    public async getSavedExperiences(userId: string): Promise<any[]> {
+        return this.profileService.getSavedExperiences(userId);
     }
 
-    public async addSavedPost(userId: string, postId: string): Promise<boolean> {
-        return this.profileService.addSavedPost(userId, postId);
+    public async addSavedExperience(userId: string, experienceId: string): Promise<boolean> {
+        return this.profileService.addSavedExperience(userId, experienceId);
     }
 
-    public async removeSavedPost(userId: string, postId: string): Promise<boolean> {
-        return this.profileService.removeSavedPost(userId, postId);
+    public async removeSavedExperience(userId: string, experienceId: string): Promise<boolean> {
+        return this.profileService.removeSavedExperience(userId, experienceId);
     }
 
     public async getHostRating(hostId: string): Promise<{ average: number; count: number }> {
@@ -178,15 +178,17 @@ export const userService = UserService.getInstance();
 export default UserService;
 
 // Convenience function exports
-export const addSavedPost = (userId: string, postId: string) => userService.addSavedPost(userId, postId);
-export const removeSavedPost = (userId: string, postId: string) => userService.removeSavedPost(userId, postId);
+export const addSavedExperience = (userId: string, experienceId: string) => userService.addSavedExperience(userId, experienceId);
+export const removeSavedExperience = (userId: string, experienceId: string) => userService.removeSavedExperience(userId, experienceId);
+export const getSavedExperiences = (userId: string) => userService.getSavedExperiences(userId);
 export const getHostRating = (hostId: string) => userService.getHostRating(hostId);
 
-// For backward compatibility with CommonJS require()
+// CommonJS compatibility
 module.exports = userService;
 module.exports.UserService = UserService;
 module.exports.userService = userService;
-module.exports.addSavedPost = addSavedPost;
-module.exports.removeSavedPost = removeSavedPost;
+module.exports.addSavedExperience = addSavedExperience;
+module.exports.removeSavedExperience = removeSavedExperience;
+module.exports.getSavedExperiences = getSavedExperiences;
 module.exports.getHostRating = getHostRating;
 module.exports.default = UserService;

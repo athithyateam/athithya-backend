@@ -8,7 +8,6 @@ const { upload } = require("../middleware/uploadMiddleware");
 const authHandler = require("../handlers/authHandler");
 const userHandler = require("../handlers/userHandler");
 const adminHandler = require("../handlers/adminHandler");
-const communityHandler = require("../handlers/communityHandler");
 const gridMediaHandler = require("../handlers/users/gridMedia");
 
 const userrouter = express.Router();
@@ -29,18 +28,12 @@ userrouter.get("/me", checkAuth, authHandler.getMe);
 userrouter.put("/profile", checkAuth, userHandler.updateProfile);
 userrouter.put("/location", checkAuth, userHandler.updateLocation);
 userrouter.get("/location", checkAuth, userHandler.getLocation);
-userrouter.get("/me/saved", checkAuth, userHandler.getSavedPosts);
+userrouter.get("/me/saved", checkAuth, userHandler.getSavedExperiences);
 userrouter.delete("/profile", checkAuth, userHandler.deleteMyAccount);
 userrouter.post("/verify-phone/send-otp", checkAuth, otpRequestLimiter, userHandler.sendPhoneOTP);
 userrouter.post("/verify-phone/verify-otp", checkAuth, otpVerifyLimiter, userHandler.verifyPhoneOTP);
 userrouter.post("/verify-host", checkAuth, userHandler.submitHostVerification);
 
-// --- Community Posts ---
-userrouter.get("/profile/:userId/community-posts", checkOptionalAuth, communityHandler.getUserCommunityPosts);
-userrouter.post("/community-posts", checkAuth, communityHandler.createCommunityPost);
-userrouter.post("/community-posts/:id/like", checkAuth, communityHandler.toggleLike);
-userrouter.get("/community-posts/:id/likers", checkOptionalAuth, communityHandler.getPostLikers);
-userrouter.delete("/community-posts/:id", checkAuth, communityHandler.deleteCommunityPost);
 
 // --- Host Profile Grid Media ---
 userrouter.get("/profile/:userId/grid-media", checkOptionalAuth, gridMediaHandler.getHostGridMedia);

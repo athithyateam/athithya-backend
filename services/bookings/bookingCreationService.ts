@@ -1,13 +1,13 @@
 import mongoose from "mongoose";
-import { Booking, Post, User, GroupBooking, HostDetails } from "../../db/mongoose";
+const { Booking, Experience, User, GroupBooking, HostDetails } = require("../../db/mongoose");
 import { createRazorpayOrder, verifyRazorpaySignature, fetchPaymentDetails } from "../../utils/razorpay";
 import { sendHtmlEmail, renderBrandedEmail } from "../emailService";
 import { notificationService } from "../notificationService";
-import { getPlatformFeeRate } from "../posts/postPayloadParser";
+import { getPlatformFeeRate } from "../experiences/experiencePayloadParser";
 import { chatService } from "../chatService";
 
 export interface CreateBookingInput {
-    postId: string;
+    experienceId?: string;
     numberOfPeople: number;
     startDate?: string;
     endDate?: string;
@@ -181,12 +181,13 @@ export class BookingCreationService {
     }
 
     public async createBooking(data: CreateBookingInput, userId: string, userRole: string): Promise<any> {
-        const { postId, numberOfPeople, startDate, endDate, selectedTime, guestMessage, invitedUserIds, parentBookingId, groupBookingId, scheduleId } = data;
+        const { numberOfPeople, startDate, endDate, selectedTime, guestMessage, invitedUserIds, parentBookingId, groupBookingId, scheduleId } = data;
+        const experienceId = data.experienceId;
         const targetGroupBookingId = groupBookingId || scheduleId;
         const peopleCount = Number(numberOfPeople);
 
-        if (!postId || isNaN(peopleCount) || peopleCount < 1) {
-            const err: any = new Error("Post ID and a valid number of people (minimum 1) are required");
+        if (!experienceId || isNaN(peopleCount) || peopleCount < 1) {
+            const err: any = new Error("Experience ID and a valid number of people (minimum 1) are required");
             err.statusCode = 400;
             throw err;
         }
@@ -196,15 +197,15 @@ export class BookingCreationService {
             throw err;
         }
 
-        const post = await Post.findById(postId).populate("user");
-        if (!post) { const err: any = new Error("Post not found"); err.statusCode = 404; throw err; }
-        if (post.status !== "active" && post.status !== "pending") {
+        const experience = await Experience.findById(experienceId).populate("user");
+        if (!experience) { const err: any = new Error("Experience not found"); err.statusCode = 404; throw err; }
+        if (experience.status !== "active" && experience.status !== "pending") {
             const err: any = new Error("This trip is not available for booking");
             err.statusCode = 400;
             throw err;
         }
 
-        const hostId = post.user?._id || post.user;
+        const hostId = experience.user?._id || experience.user;
         if (!hostId) { const err: any = new Error("This experience has no valid host assigned"); err.statusCode = 400; throw err; }
         if (String(hostId) === String(userId)) { const err: any = new Error("You cannot book your own trip"); err.statusCode = 400; throw err; }
         if (userRole === "host") { const err: any = new Error("Hosts cannot engage with another host's experience. Only guests can."); err.statusCode = 400; throw err; }
@@ -218,23 +219,20 @@ export class BookingCreationService {
         const { isInviteBooking, effectivePeople } = await this.resolveGroupContext(userId, peopleCount, parentBookingId, targetGroupBookingId);
         const user = await User.findById(userId);
         const useWallet = data.useWallet === true || data.useWallet === "true";
-        const pricing = calculateBookingPricing(post, peopleCount, effectivePeople, useWallet, user?.walletBalance || 0);
+        const pricing = calculateBookingPricing(experience, peopleCount, effectivePeople, useWallet, user?.walletBalance || 0);
 
         let razorpayOrder: any = null;
         if (pricing.payableAmount > 0) {
             razorpayOrder = await createRazorpayOrder(pricing.payableAmount);
         }
 
-        const validTypes = ["experience", "service", "plan", "trek"];
-        const normalizedPostType = validTypes.includes(String(post.postType).toLowerCase()) ? String(post.postType).toLowerCase() : "experience";
-        const dates = parseBookingDates(startDate, selectedTime, endDate, post.duration);
+        const dates = parseBookingDates(startDate, selectedTime, endDate, experience.duration);
 
         const booking = new Booking({
             guest: userId,
             host: hostId,
-            post: postId,
-            postType: normalizedPostType,
-            postTitle: post.title || "Athithya Experience",
+            experience: experienceId,
+            experienceTitle: experience.title || "Athithya Experience",
             numberOfPeople: peopleCount,
             baseAmount: pricing.baseAmount,
             discountAmount: pricing.discountAmount,
@@ -306,9 +304,10 @@ export class BookingCreationService {
             } catch (wErr) { console.error("Wallet deduction error:", wErr); }
         }
 
-        if (booking.post) {
-            const postId = booking.post._id || booking.post;
-            Post.findByIdAndUpdate(postId, { $inc: { bookingCount: 1 } }).catch(() => {});
+        const expId = booking.experience;
+        if (expId) {
+            const expDocId = expId._id || expId;
+            Experience.findByIdAndUpdate(expDocId, { $inc: { bookingCount: 1 } }).catch(() => {});
         }
 
         if (hostId) {
@@ -335,7 +334,7 @@ export class BookingCreationService {
             const hostUser = await User.findById(hostId, "firstname lastname email");
             const guestName = `${guestUser?.firstname || ""} ${guestUser?.lastname || ""}`.trim() || "Traveler";
             const hostName = `${hostUser?.firstname || ""} ${hostUser?.lastname || ""}`.trim() || "Host";
-            const title = booking.postTitle || "Athithya Experience";
+            const title = booking.experienceTitle || "Athithya Experience";
 
             const adminEmail = process.env.ADMIN_EMAIL || "teamsathithya@gmail.com";
             const adminHtml = renderBrandedEmail("New Experience Booked", `<p><strong>${guestName}</strong> booked <strong>${hostName}'s</strong> experience.</p><p><strong>Experience:</strong> ${title}<br/><strong>Total Paid:</strong> ₹${booking.totalAmount}</p>`, "Admin Alert");
@@ -387,28 +386,32 @@ export class BookingCreationService {
                         recipient: initiatorId,
                         sender: guestId,
                         title: "Friend Joined!",
-                        message: `${name} has successfully booked and joined your group for "${booking.postTitle}"!`,
+                        message: `${name} has successfully booked and joined your group for "${booking.experienceTitle || "the experience"}"!`,
                         type: "invite_accepted",
-                        link: `/post/${booking.post?._id || booking.post}?groupBookingId=${groupBookingObj._id}`,
+                        link: `/experiences/${booking.experience?._id || booking.experience}?groupBookingId=${groupBookingObj._id}`,
                         metadata: { groupBookingId: groupBookingObj._id }
                     });
                 }
+                const expTargetId = booking.experience?._id || booking.experience;
+                const expTitle = booking.experienceTitle;
 
                 await notificationService.sendNotification({
                     recipient: hostId,
                     sender: guestId,
                     title: "Booking Update",
-                    message: `A traveler has joined a group booking for "${booking.postTitle}"`,
+                    message: `A traveler has joined a group booking for "${expTitle}"`,
                     type: "booking_accepted",
                     link: `/bookings/${booking._id}`,
-                    metadata: { postId: booking.post?._id || booking.post, bookingId: booking._id }
+                    metadata: { experienceId: expTargetId, bookingId: booking._id }
                 });
             } else {
+                const expTargetId = booking.experience?._id || booking.experience;
+                const expTitle = booking.experienceTitle;
+
                 groupBookingObj = new GroupBooking({
                     initiator: guestId,
-                    post: booking.post?._id || booking.post,
-                    postType: booking.postType || "experience",
-                    postTitle: booking.postTitle,
+                    experience: expTargetId,
+                    experienceTitle: expTitle,
                     bookingDate: booking.startDate || new Date(),
                     numberOfPeople: booking.numberOfPeople,
                     status: "confirmed",
@@ -424,10 +427,10 @@ export class BookingCreationService {
                     recipient: hostId,
                     sender: guestId,
                     title: "Booking Confirmed",
-                    message: `A traveler has confirmed a booking for "${booking.postTitle}"`,
+                    message: `A traveler has confirmed a booking for "${expTitle}"`,
                     type: "booking_accepted",
                     link: `/bookings/${booking._id}`,
-                    metadata: { postId: booking.post?._id || booking.post, bookingId: booking._id }
+                    metadata: { experienceId: expTargetId, bookingId: booking._id }
                 });
             }
         } catch (groupErr) { console.error("Failed to sync group booking:", groupErr); }

@@ -40,9 +40,10 @@ const getMyWishlistSchedules = async (req, res) => {
 
 const checkScheduleStatus = async (req, res) => {
     try {
+        const targetId = req.params.experienceId;
         const schedule = await wishlistScheduleService.checkWishlistScheduleStatus(
             req.user.userId,
-            req.params.postId
+            targetId
         );
 
         res.status(200).json({

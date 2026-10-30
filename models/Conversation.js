@@ -21,20 +21,12 @@ const conversationSchema = new mongoose.Schema({
         type: Map,
         of: Number,
         default: {}
-    },
-    itinerary: [{
-        lat: { type: Number, required: true },
-        lng: { type: Number, required: true },
-        cityName: String,
-        postId: { type: mongoose.Schema.Types.ObjectId, ref: 'post' },
-        addedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
-        createdAt: { type: Date, default: Date.now }
-    }]
+    }
 }, { timestamps: true });
 
 conversationSchema.index({ participants: 1 });
 conversationSchema.index({ updatedAt: -1 });
 
-const Conversation = mongoose.model("conversation", conversationSchema);
+const Conversation = mongoose.models.conversation || mongoose.model("conversation", conversationSchema);
 
 module.exports = Conversation;

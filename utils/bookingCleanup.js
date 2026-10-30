@@ -49,7 +49,7 @@ const checkExpiredGroupBookings = async () => {
                     }
 
                     const friendName = friendBooking.guest ? `${friendBooking.guest.firstname} ${friendBooking.guest.lastname}` : "Traveler";
-                    const experienceTitle = friendBooking.postTitle || friendBooking.post?.title || "experience";
+                    const experienceTitle = friendBooking.experienceTitle || friendBooking.experience?.title || "experience";
 
                     // Calculate price detail
                     const paidPriceStr = `₹${friendBooking.totalAmount.toLocaleString()}`;
@@ -113,7 +113,7 @@ const checkExpiredGroupBookings = async () => {
                             message: `Dear host, ${friendName} has paid ${paidPriceStr} (including ${feeStr} platform fee) for your experience "${experienceTitle}" through our invitation feature. The initiator has backed out. Would you like to accept this booking for ${paidPriceStr}?`,
                             type: 'orphaned_invite_host_request',
                             link: `/bookings/${friendBooking._id}`,
-                            metadata: { postId: friendBooking.post, bookingId: friendBooking._id },
+                            metadata: { experienceId: friendBooking.experience, bookingId: friendBooking._id },
                             emailSubject: hostSubject,
                             emailHtml: hostHtml
                         });

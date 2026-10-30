@@ -122,9 +122,8 @@ app.use((req, res, next) => {
 
 // Routes
 const userRoutes = require("./routes/users");
-const postRoutes = require("./routes/posts");
+const experienceRoutes = require("./routes/experiences");
 const reviewRoutes = require("./routes/reviews");
-const itineraryRoutes = require("./routes/itineraries");
 const searchRoutes = require("./routes/search");
 const bookingRoutes = require("./routes/bookings");
 const groupBookingRoutes = require("./routes/groupBookings");
@@ -134,9 +133,8 @@ const { startWishlistReminderWorker } = require("./utils/wishlistReminderWorker"
 
 app.use("/api/auth", userRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/posts", postRoutes);
+app.use("/api/experiences", experienceRoutes);
 app.use("/api/reviews", reviewRoutes);
-app.use("/api/itineraries", itineraryRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/notifications", require("./routes/notifications"));
 app.use("/api/bookings", bookingRoutes);

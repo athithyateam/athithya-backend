@@ -28,8 +28,8 @@ export interface SendSmsOtpOptions {
 
 export interface SendBookingJourneyOtpOptions {
     email: string;
-    postTitle: string;
-    type: "check-in" | "checkout";
+    experienceTitle?: string;
+    type: "check-in" | "checkout" | "start" | "completion";
     expiresInMinutes?: number;
     length?: number;
 }
@@ -264,18 +264,19 @@ export class OtpService {
      * Send booking journey check-in or checkout OTP email
      */
     public async sendBookingJourneyOTP(options: SendBookingJourneyOtpOptions): Promise<TimedOtpResult> {
-        const { email, postTitle, type, expiresInMinutes = 15, length = 6 } = options;
+        const { email, experienceTitle, type, expiresInMinutes = 15, length = 6 } = options;
         if (!email || !email.trim()) {
             httpError(400, "Guest email is required to send journey OTP");
         }
 
+        const expName = experienceTitle || "Experience";
         const { otp, expiresAt } = this.generateTimedOTP(expiresInMinutes, length);
 
-        const isCheckIn = type === "check-in";
-        const subject = isCheckIn ? "Athithya - Your Check-in OTP" : "Athithya - Your Checkout OTP";
-        const title = isCheckIn
-            ? `Check-in OTP for "${postTitle}"`
-            : `Journey Completion OTP for "${postTitle}"`;
+        const isStart = type === "check-in" || type === "start";
+        const subject = isStart ? "Athithya - Your Experience Start OTP" : "Athithya - Your Experience Completion OTP";
+        const title = isStart
+            ? `Experience Start OTP for "${expName}"`
+            : `Experience Completion OTP for "${expName}"`;
 
         await this.emailNotifier.sendOTPEmail(email.trim(), otp, subject, title);
         return { otp, expiresAt };

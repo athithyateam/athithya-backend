@@ -1,29 +1,29 @@
 const mongoose = require("mongoose");
 
 const groupBookingSchema = new mongoose.Schema({
-    initiator: { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true }, // The user who started the invitation/plan
-    post: { type: mongoose.Schema.Types.ObjectId, ref: 'post', required: true },
-    postType: { type: String, required: true },
-    postTitle: { type: String, required: true },
+    initiator: { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
+    experience: { type: mongoose.Schema.Types.ObjectId, ref: 'experience', required: true },
+    experienceTitle: { type: String },
     invitedPeople: [{
         user: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
         status: { type: String, enum: ['pending', 'accepted', 'rejected'], default: 'pending' },
-        hasPaid: { type: Boolean, default: false }, // Only true if this specific invited friend has completed their payment
+        hasPaid: { type: Boolean, default: false },
         invitedAt: { type: Date, default: Date.now },
         respondedAt: { type: Date }
     }],
-    bookingDate: { type: Date, required: true }, // The target date selected for the experience
-    numberOfPeople: { type: Number, default: 1 }, // Initiator's selected group size baseline
+    bookingDate: { type: Date, required: true },
+    numberOfPeople: { type: Number, default: 1 },
     status: { type: String, enum: ['planning', 'confirmed', 'cancelled'], default: 'planning' },
-    isBooked: { type: Boolean, default: false }, // Becomes true when the initiator pays
-    initiatorPaid: { type: Boolean, default: false }, // Explicitly tracks initiator payment
-    bookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'booking' } // Link to the primary booking record
+    isBooked: { type: Boolean, default: false },
+    initiatorPaid: { type: Boolean, default: false },
+    bookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'booking' }
 }, { timestamps: true });
 
 groupBookingSchema.index({ initiator: 1, createdAt: -1 });
+groupBookingSchema.index({ experience: 1 });
 groupBookingSchema.index({ 'invitedPeople.user': 1 });
 groupBookingSchema.index({ status: 1, isBooked: 1, initiatorPaid: 1 });
 
-const GroupBooking = mongoose.model("groupBooking", groupBookingSchema);
+const GroupBooking = mongoose.models.groupBooking || mongoose.model("groupBooking", groupBookingSchema);
 
 module.exports = GroupBooking;

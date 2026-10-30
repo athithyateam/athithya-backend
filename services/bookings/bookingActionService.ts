@@ -1,4 +1,4 @@
-import { Booking, User } from "../../db/mongoose";
+const { Booking, User } = require("../../db/mongoose");
 import { sendHtmlEmail, renderBrandedEmail } from "../emailService";
 import { otpService } from "../otpService";
 import { notificationService } from "../notificationService";
@@ -39,7 +39,8 @@ export class BookingActionService {
         const total = await Booking.countDocuments(query);
         const rawBookedData = await Booking.find(query)
             .populate("guest", "firstname lastname avatar")
-            .populate("post", "title postType photos location duration price")
+            .populate("experience", "title photos location duration price")
+            .populate("post", "title photos location duration price")
             .populate({ path: "joinedUsers.booking", select: "totalAmount status isInviteBooking" })
             .sort({ createdAt: -1 })
             .skip((pageNum - 1) * limitNum)
@@ -95,7 +96,8 @@ export class BookingActionService {
         const total = await Booking.countDocuments(query);
         const bookings = await Booking.find(query)
             .populate("host", "firstname lastname email avatar")
-            .populate("post", "title postType photos location duration price")
+            .populate("experience", "title photos location duration price")
+            .populate("post", "title photos location duration price")
             .populate("invitedUsers", "firstname lastname avatar")
             .populate({ path: "joinedUsers.user", select: "firstname lastname avatar" })
             .populate({ path: "joinedUsers.booking", select: "startDate endDate totalAmount" })
@@ -113,7 +115,8 @@ export class BookingActionService {
         const booking: any = await Booking.findById(bookingId)
             .populate("guest", "firstname lastname email avatar")
             .populate("host", "firstname lastname email avatar")
-            .populate("post", "title postType photos location price");
+            .populate("experience", "title photos location price")
+            .populate("post", "title photos location price");
 
         if (!booking) {
             const err: any = new Error("Booking not found");
@@ -149,26 +152,29 @@ export class BookingActionService {
         booking.respondedAt = new Date();
         await booking.save();
 
+        const expTargetId = booking.experience?._id || booking.experience;
+        const expTitle = booking.experienceTitle || "experience";
+
         await notificationService.sendNotification({
             recipient: booking.guest._id,
             sender: hostId,
             title: "Booking Accepted",
-            message: `Your booking request for "${booking.postTitle}" has been accepted!`,
+            message: `Your booking request for "${expTitle}" has been accepted!`,
             type: "booking_accepted",
             link: `/bookings/${booking._id}`,
-            metadata: { postId: booking.post?._id, bookingId: booking._id }
+            metadata: { experienceId: expTargetId, bookingId: booking._id }
         });
 
         if (booking.guest?.email) {
             const frontendUrl = (process.env.FRONTEND_URL || "https://athithya.in").replace(/\/$/, "");
             const html = renderBrandedEmail("Booking Confirmed!", `
                 <p>Hello ${booking.guest.firstname || "there"},</p>
-                <p>Your host has accepted your booking request for <strong>${booking.postTitle || "your experience"}</strong>!</p>
+                <p>Your host has accepted your booking request for <strong>${expTitle}</strong>!</p>
                 <div style="margin: 32px 0; text-align: center;">
                     <a href="${frontendUrl}/bookings/${booking._id}" style="background-color: #C59A2F; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: bold; font-size: 14px; display: inline-block;">View Booking Details</a>
                 </div>
             `, "Booking Accepted");
-            sendHtmlEmail(booking.guest.email, `Booking Accepted: ${booking.postTitle || "Experience"} - Athithya`, html).catch(() => {});
+            sendHtmlEmail(booking.guest.email, `Booking Accepted: ${expTitle} - Athithya`, html).catch(() => {});
         }
 
         const result = booking.toObject();
@@ -177,7 +183,7 @@ export class BookingActionService {
     }
 
     public async declineBooking(bookingId: string, hostId: string, hostResponse: string = ""): Promise<any> {
-        const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("post", "title");
+        const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("experience", "title");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
         if (booking.status !== "pending") { const err: any = new Error(`Cannot decline ${booking.status} booking`); err.statusCode = 400; throw err; }
@@ -187,26 +193,29 @@ export class BookingActionService {
         booking.respondedAt = new Date();
         await booking.save();
 
+        const expDeclinedTargetId = booking.experience?._id;
+        const expDeclinedTitle = booking.experienceTitle || "experience";
+
         await notificationService.sendNotification({
             recipient: booking.guest._id,
             sender: hostId,
             title: "Booking Declined",
-            message: `Your booking request for "${booking.postTitle}" has been declined`,
+            message: `Your booking request for "${expDeclinedTitle}" has been declined`,
             type: "booking_declined",
             link: `/bookings/${booking._id}`,
-            metadata: { postId: booking.post?._id, bookingId: booking._id }
+            metadata: { experienceId: expDeclinedTargetId, bookingId: booking._id }
         });
 
         if (booking.guest?.email) {
             const frontendUrl = (process.env.FRONTEND_URL || "https://athithya.in").replace(/\/$/, "");
             const html = renderBrandedEmail("Booking Request Declined", `
                 <p>Hello ${booking.guest.firstname || "there"},</p>
-                <p>Your booking request for <strong>${booking.postTitle || "this experience"}</strong> could not be accommodated at this time.</p>
+                <p>Your booking request for <strong>${booking.experienceTitle || "this experience"}</strong> could not be accommodated at this time.</p>
                 <div style="margin: 32px 0; text-align: center;">
                     <a href="${frontendUrl}/explore" style="background-color: #C59A2F; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: bold; font-size: 14px; display: inline-block;">Explore Other Experiences</a>
                 </div>
             `, "Booking Update");
-            sendHtmlEmail(booking.guest.email, `Booking Update: ${booking.postTitle || "Experience"} - Athithya`, html).catch(() => {});
+            sendHtmlEmail(booking.guest.email, `Booking Update: ${booking.experienceTitle || "Experience"} - Athithya`, html).catch(() => {});
         }
 
         const result = booking.toObject();
@@ -227,7 +236,7 @@ export class BookingActionService {
             recipient: booking.host,
             sender: guestId,
             title: "Cancellation Requested",
-            message: `Guest has requested to cancel their booking for "${booking.postTitle}"`,
+            message: `Guest has requested to cancel their booking for "${booking.experienceTitle || "the experience"}"`,
             type: "booking_cancelled",
             link: "/profile"
         });
@@ -248,7 +257,7 @@ export class BookingActionService {
             recipient: booking.guest,
             sender: hostId,
             title: "Cancellation Approved",
-            message: `Your cancellation request for "${booking.postTitle}" has been approved. Refund is processing.`,
+            message: `Your cancellation request for "${booking.experienceTitle || "the experience"}" has been approved. Refund is processing.`,
             type: "booking_cancelled",
             link: "/profile"
         });
@@ -262,23 +271,24 @@ export class BookingActionService {
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
         if (booking.status !== "accepted") { const err: any = new Error("Booking must be accepted to start the journey"); err.statusCode = 400; throw err; }
 
+        const expTitle = booking.experienceTitle;
         const { otp, expiresAt } = await otpService.sendBookingJourneyOTP({
             email: booking.guest?.email,
-            postTitle: booking.postTitle,
-            type: "check-in"
+            experienceTitle: expTitle,
+            type: "start"
         });
         booking.startOTP = otp;
         booking.startOTPExpiresAt = expiresAt;
         await booking.save();
 
-        return { success: true, message: "Check-in OTP sent successfully to guest's email" };
+        return { success: true, message: "Experience Start OTP sent successfully to guest's email" };
     }
 
     public async verifyStartOTP(bookingId: string, hostId: string, otp: string): Promise<any> {
         const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("host", "firstname lastname email");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host._id.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
-        if (booking.status !== "accepted") { const err: any = new Error("Booking must be accepted to verify check-in"); err.statusCode = 400; throw err; }
+        if (booking.status !== "accepted") { const err: any = new Error("Booking must be accepted to verify experience start"); err.statusCode = 400; throw err; }
 
         otpService.verifyTimedOTP(booking.startOTP, booking.startOTPExpiresAt, otp);
 
@@ -288,15 +298,16 @@ export class BookingActionService {
         booking.startOTPExpiresAt = undefined;
         await booking.save();
 
+        const expTitle = booking.experienceTitle || "Experience";
         const adminEmail = process.env.ADMIN_EMAIL || "teamsathithya@gmail.com";
-        const adminHtml = renderBrandedEmail("Journey Started Successfully", `<p><strong>${booking.guest?.firstname} ${booking.guest?.lastname}</strong> has checked in for <strong>"${booking.postTitle}"</strong> with host <strong>${booking.host?.firstname}</strong>.</p>`, "Journey Alert");
-        sendHtmlEmail(adminEmail, `Journey Started - Booking #${bookingId}`, adminHtml).catch(() => {});
+        const adminHtml = renderBrandedEmail("Experience Started Successfully", `<p><strong>${booking.guest?.firstname} ${booking.guest?.lastname}</strong> has started <strong>"${expTitle}"</strong> with host <strong>${booking.host?.firstname}</strong>.</p>`, "Journey Alert");
+        sendHtmlEmail(adminEmail, `Experience Started - Booking #${bookingId}`, adminHtml).catch(() => {});
 
         await notificationService.sendNotification({
             recipient: booking.guest._id,
             sender: hostId,
-            title: "Check-in Confirmed",
-            message: `Your check-in for "${booking.postTitle}" has been verified! Have a great trip!`,
+            title: "Experience Start Confirmed",
+            message: `Your start OTP for "${expTitle}" has been verified! Have a wonderful experience!`,
             type: "booking_accepted",
             link: `/bookings/${booking._id}`
         });
@@ -309,25 +320,26 @@ export class BookingActionService {
         const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
-        if (booking.status !== "in_progress") { const err: any = new Error("Journey must be active (in progress) to complete it"); err.statusCode = 400; throw err; }
+        if (booking.status !== "in_progress") { const err: any = new Error("Experience journey must be in progress to complete it"); err.statusCode = 400; throw err; }
 
+        const expTitle = booking.experienceTitle;
         const { otp, expiresAt } = await otpService.sendBookingJourneyOTP({
             email: booking.guest?.email,
-            postTitle: booking.postTitle,
-            type: "checkout"
+            experienceTitle: expTitle,
+            type: "completion"
         });
         booking.completionOTP = otp;
         booking.completionOTPExpiresAt = expiresAt;
         await booking.save();
 
-        return { success: true, message: "Checkout OTP sent successfully to guest's email" };
+        return { success: true, message: "Experience Completion OTP sent successfully to guest's email" };
     }
 
     public async verifyCompletionOTP(bookingId: string, hostId: string, otp: string): Promise<any> {
         const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("host", "firstname lastname email");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host._id.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
-        if (booking.status !== "in_progress") { const err: any = new Error("Journey must be active to verify checkout"); err.statusCode = 400; throw err; }
+        if (booking.status !== "in_progress") { const err: any = new Error("Experience journey must be active to verify completion"); err.statusCode = 400; throw err; }
 
         otpService.verifyTimedOTP(booking.completionOTP, booking.completionOTPExpiresAt, otp);
 
@@ -346,24 +358,26 @@ export class BookingActionService {
             }
         } catch (sErr) {}
 
+        const expTitle = booking.experienceTitle || "Experience";
         const adminEmail = process.env.ADMIN_EMAIL || "teamsathithya@gmail.com";
-        const adminHtml = renderBrandedEmail("Journey Completed Successfully", `<p><strong>${booking.guest?.firstname}</strong> completed experience <strong>"${booking.postTitle}"</strong> with host <strong>${booking.host?.firstname}</strong>.</p>`, "Journey Alert");
-        sendHtmlEmail(adminEmail, `Journey Completed - Booking #${bookingId}`, adminHtml).catch(() => {});
+        const adminHtml = renderBrandedEmail("Experience Completed Successfully", `<p><strong>${booking.guest?.firstname}</strong> completed experience <strong>"${expTitle}"</strong> with host <strong>${booking.host?.firstname}</strong>.</p>`, "Journey Alert");
+        sendHtmlEmail(adminEmail, `Experience Completed - Booking #${bookingId}`, adminHtml).catch(() => {});
 
+        const expTargetId = booking.experience?._id || booking.experience;
         await notificationService.sendNotification({
             recipient: booking.guest._id,
             sender: hostId,
-            title: "Journey Completed! Share your experience",
-            message: `Thank you for choosing Athithya! Please share your experience and review "${booking.postTitle}".`,
+            title: "Experience Completed! Share your review",
+            message: `Thank you for choosing Athithya! Please share your experience and review "${expTitle}".`,
             type: "booking_accepted",
-            link: `/post/${booking.post}?type=${booking.postType || "experience"}`
+            link: `/experiences/${expTargetId}`
         });
 
         if (booking.guest?.email) {
-            const reviewUrl = `${process.env.FRONTEND_URL || "https://athithya.in"}/post/${booking.post}?type=${booking.postType || "experience"}`;
+            const reviewUrl = `${process.env.FRONTEND_URL || "https://athithya.in"}/experiences/${expTargetId}`;
             const guestHtml = renderBrandedEmail("Thank you for choosing Athithya!", `
                 <p>Hi ${booking.guest?.firstname || "Traveler"},</p>
-                <p>We hope you had an incredible journey experiencing <strong>"${booking.postTitle}"</strong>!</p>
+                <p>We hope you had an incredible journey experiencing <strong>"${expTitle}"</strong>!</p>
                 <div style="text-align: center; margin-top: 25px;"><a href="${reviewUrl}" style="background-color: #C59A2F; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold;">Leave a Review</a></div>
             `, "Feedback Request");
             sendHtmlEmail(booking.guest.email, "Thank you for choosing Athithya - Share your experience", guestHtml).catch(() => {});
@@ -374,13 +388,14 @@ export class BookingActionService {
     }
 
     public async acceptOrphanedBooking(bookingId: string, hostId: string): Promise<any> {
-        const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("post", "title");
+        const booking: any = await Booking.findById(bookingId).populate("guest", "firstname lastname email").populate("experience", "title").populate("post", "title");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
 
         booking.status = "accepted";
         await booking.save();
-        const experienceTitle = booking.postTitle || booking.post?.title || "experience";
+        const expTargetId = booking.experience?._id;
+        const experienceTitle = booking.experienceTitle || booking.experience?.title || "experience";
 
         await notificationService.sendNotification({
             recipient: booking.guest._id,
@@ -389,7 +404,7 @@ export class BookingActionService {
             message: `Congratulations! Your booking for "${experienceTitle}" has been successfully confirmed!`,
             type: "orphaned_invite_accepted",
             link: `/bookings/${booking._id}`,
-            metadata: { postId: booking.post?._id, bookingId: booking._id }
+            metadata: { experienceId: expTargetId, bookingId: booking._id }
         });
 
         if (booking.guest?.email) {
@@ -403,7 +418,7 @@ export class BookingActionService {
     }
 
     public async rejectOrphanedBooking(bookingId: string, hostId: string): Promise<any> {
-        const booking: any = await Booking.findById(bookingId).populate("guest").populate("post", "title");
+        const booking: any = await Booking.findById(bookingId).populate("guest").populate("experience", "title");
         if (!booking) { const err: any = new Error("Booking not found"); err.statusCode = 404; throw err; }
         if (booking.host.toString() !== hostId.toString()) { const err: any = new Error("Unauthorized"); err.statusCode = 403; throw err; }
 
@@ -419,7 +434,8 @@ export class BookingActionService {
         }
 
         const guestName = guestUser ? `${guestUser.firstname} ${guestUser.lastname}` : "Traveler";
-        const experienceTitle = booking.postTitle || booking.post?.title || "experience";
+        const expTargetId = booking.experience?._id;
+        const experienceTitle = booking.experienceTitle || booking.experience?.title || "experience";
 
         await notificationService.sendNotification({
             recipient: booking.guest._id,
@@ -428,7 +444,7 @@ export class BookingActionService {
             message: `Hi ${guestName}, Unfortunately, the host declined the booking you were invited to. We credited ₹${refundAmount.toLocaleString()} to your wallet.`,
             type: "orphaned_invite_declined",
             link: `/bookings/${booking._id}`,
-            metadata: { postId: booking.post?._id, bookingId: booking._id }
+            metadata: { experienceId: expTargetId, bookingId: booking._id }
         });
 
         if (booking.guest?.email) {

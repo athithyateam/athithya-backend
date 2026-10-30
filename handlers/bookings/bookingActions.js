@@ -56,7 +56,7 @@ exports.sendStartOTP = async (req, res) => {
         res.status(200).json(result);
     } catch (error) {
         console.error("Error in sendStartOTP:", error);
-        res.status(error.statusCode || 500).json({ success: false, message: error.message || "Failed to send check-in OTP" });
+        res.status(error.statusCode || 500).json({ success: false, message: error.message || "Failed to send experience start OTP" });
     }
 };
 
@@ -66,10 +66,10 @@ exports.verifyStartOTP = async (req, res) => {
         const { otp } = req.body;
 
         const data = await bookingService.verifyStartOTP(bookingId, req.user.userId, otp);
-        res.status(200).json({ success: true, message: "Check-in verified successfully. Journey has started!", data });
+        res.status(200).json({ success: true, message: "Experience start verified successfully! Enjoy your experience!", data });
     } catch (error) {
         console.error("Error in verifyStartOTP:", error);
-        res.status(error.statusCode || 500).json({ success: false, message: error.message || "Failed to verify check-in OTP" });
+        res.status(error.statusCode || 500).json({ success: false, message: error.message || "Failed to verify experience start OTP" });
     }
 };
 
@@ -80,7 +80,7 @@ exports.sendCompletionOTP = async (req, res) => {
         res.status(200).json(result);
     } catch (error) {
         console.error("Error in sendCompletionOTP:", error);
-        res.status(error.statusCode || 500).json({ success: false, message: error.message || "Failed to send checkout OTP" });
+        res.status(error.statusCode || 500).json({ success: false, message: error.message || "Failed to send experience completion OTP" });
     }
 };
 
@@ -90,10 +90,10 @@ exports.verifyCompletionOTP = async (req, res) => {
         const { otp } = req.body;
 
         const data = await bookingService.verifyCompletionOTP(bookingId, req.user.userId, otp);
-        res.status(200).json({ success: true, message: "Checkout verified successfully. Journey completed!", data });
+        res.status(200).json({ success: true, message: "Experience completion verified successfully!", data });
     } catch (error) {
         console.error("Error in verifyCompletionOTP:", error);
-        res.status(error.statusCode || 500).json({ success: false, message: error.message || "Failed to verify checkout OTP" });
+        res.status(error.statusCode || 500).json({ success: false, message: error.message || "Failed to verify experience completion OTP" });
     }
 };
 

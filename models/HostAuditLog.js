@@ -71,6 +71,6 @@ hostAuditLogSchema.virtual("experiencePhotos").get(function() {
     return this.snapshot?.experiencePhotos || this.snapshot?.photos;
 });
 
-const HostAuditLog = mongoose.model("hostAuditLog", hostAuditLogSchema);
+const HostAuditLog = mongoose.models.hostAuditLog || mongoose.model("hostAuditLog", hostAuditLogSchema);
 
 module.exports = HostAuditLog;

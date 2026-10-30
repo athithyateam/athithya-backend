@@ -17,7 +17,7 @@ const {
 const { submitHostVerification, sendPhoneOTP, verifyPhoneOTP } = require("./users/verification");
 
 
-const { getSavedPosts } = require("./users/saved");
+const { getSavedExperiences } = require("./users/saved");
 const { 
     sendFriendRequest, 
     acceptFriendRequest, 
@@ -39,7 +39,7 @@ module.exports = {
     getCompleteProfile,
     getTopRatedHosts,
     getUserById,
-    getSavedPosts,
+    getSavedExperiences,
     sendFriendRequest,
     acceptFriendRequest,
     rejectFriendRequest,

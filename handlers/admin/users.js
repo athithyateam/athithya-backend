@@ -1,4 +1,4 @@
-const { User, HostDetails, HostAuditLog, Review, Post, Notification, Friendship, FriendRequest, SavedPost, HostPinnedExperienceMedia, WishlistSchedule } = require("../../db/mongoose");
+const { User, HostDetails, HostAuditLog, Review, Experience, Notification, Friendship, FriendRequest, SavedExperience, HostPinnedExperienceMedia, WishlistSchedule } = require("../../db/mongoose");
 
 exports.getAllUsers = async (req, res) => {
     try {
@@ -24,7 +24,7 @@ exports.getAllUsers = async (req, res) => {
         // Parallelize paginated fetch + all three count queries
         const [users, totalUsers, allCount, guestsCount, hostsCount] = await Promise.all([
             User.find(query)
-                .select("-password -likedPosts -bookmarkedItineraries -notifications")
+                .select("-password")
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
@@ -153,24 +153,24 @@ exports.deleteUser = async (req, res) => {
         await HostAuditLog.deleteMany({ hostId: userId });
 
         // Delete all Reviews submitted by this user or about this host, and recalculate ratings
-        const userSubmittedReviews = await Review.find({ reviewer: userId, post: { $ne: null } });
-        const affectedPostIds = [...new Set(userSubmittedReviews.map(r => r.post?.toString()).filter(Boolean))];
+        const userSubmittedReviews = await Review.find({ reviewer: userId, $or: [{ experience: { $ne: null } }, { post: { $ne: null } }] });
+        const affectedExpIds = [...new Set(userSubmittedReviews.map(r => (r.experience || r.post)?.toString()).filter(Boolean))];
 
         await Review.deleteMany({ $or: [{ reviewer: userId }, { host: userId }] });
 
-        for (const postId of affectedPostIds) {
+        for (const expId of affectedExpIds) {
             try {
-                const remainingReviews = await Review.find({ post: postId });
+                const remainingReviews = await Review.find({ $or: [{ experience: expId }, { post: expId }] });
                 const count = remainingReviews.length;
                 const average = count > 0 
                     ? Math.round((remainingReviews.reduce((sum, r) => sum + r.rating, 0) / count) * 10) / 10 
                     : 0;
-                await Post.findByIdAndUpdate(postId, {
+                await Experience.findByIdAndUpdate(expId, {
                     'rating.average': average,
                     'rating.count': count
                 });
             } catch (calcErr) {
-                console.error("Error recalculating post rating on admin user delete:", calcErr);
+                console.error("Error recalculating experience rating on admin user delete:", calcErr);
             }
         }
 
@@ -181,7 +181,7 @@ exports.deleteUser = async (req, res) => {
         await Promise.all([
             Friendship.deleteMany({ $or: [{ user: userId }, { friend: userId }] }),
             FriendRequest.deleteMany({ $or: [{ sender: userId }, { recipient: userId }] }),
-            SavedPost.deleteMany({ user: userId }),
+            SavedExperience.deleteMany({ user: userId }),
             HostPinnedExperienceMedia.deleteMany({ user: userId }),
             WishlistSchedule.deleteMany({ user: userId })
         ]);

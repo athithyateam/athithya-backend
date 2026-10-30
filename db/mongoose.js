@@ -1,14 +1,13 @@
 const mongoose = require("mongoose");
 const User = require("../models/User");
 const OTP = require("../models/OTP");
-const Post = require("../models/Post");
+const Experience = require("../models/Experience");
 const Review = require("../models/Review");
 const Notification = require("../models/Notification");
 const Booking = require("../models/Booking");
 const GroupBooking = require("../models/GroupBooking");
 const Conversation = require("../models/Conversation");
 const Message = require("../models/Message");
-const CommunityPost = require("../models/CommunityPost");
 const HostDetails = require("../models/HostDetails");
 const HostAuditLog = require("../models/HostAuditLog");
 const HostPersonalMedia = require("../models/HostPersonalMedia");
@@ -16,7 +15,7 @@ const HostPinnedExperienceMedia = require("../models/HostPinnedExperienceMedia")
 const WishlistSchedule = require("../models/WishlistSchedule");
 const Friendship = require("../models/Friendship");
 const FriendRequest = require("../models/FriendRequest");
-const SavedPost = require("../models/SavedPost");
+const SavedExperience = require("../models/SavedExperience");
 
 const MONGO_URL = process.env.MONGO_URL;
 
@@ -122,14 +121,13 @@ module.exports = {
     connectDB,
     User,
     OTP,
-    Post,
+    Experience,
     Review,
     Notification,
     Booking,
     GroupBooking,
     Conversation,
     Message,
-    CommunityPost,
     HostDetails,
     HostAuditLog,
     HostPersonalMedia,
@@ -137,5 +135,5 @@ module.exports = {
     WishlistSchedule,
     Friendship,
     FriendRequest,
-    SavedPost
+    SavedExperience
 };

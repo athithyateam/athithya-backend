@@ -3,9 +3,8 @@ const mongoose = require("mongoose");
 const bookingSchema = new mongoose.Schema({
     guest: { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
     host: { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
-    post: { type: mongoose.Schema.Types.ObjectId, ref: 'post', required: true },
-    postType: { type: String, enum: ['experience', 'service', 'plan', 'trek'], required: true },
-    postTitle: { type: String, required: true },
+    experience: { type: mongoose.Schema.Types.ObjectId, ref: 'experience', required: true },
+    experienceTitle: { type: String },
     numberOfPeople: { type: Number, required: true, min: 1 },
     baseAmount: { type: Number, required: true, min: 0 },
     discountAmount: { type: Number, default: 0 },
@@ -57,9 +56,9 @@ const bookingSchema = new mongoose.Schema({
 
 bookingSchema.index({ guest: 1, createdAt: -1 });
 bookingSchema.index({ host: 1, status: 1, createdAt: -1 });
-bookingSchema.index({ post: 1, status: 1 });
+bookingSchema.index({ experience: 1, status: 1 });
 bookingSchema.index({ groupBookingId: 1 });
 
-const Booking = mongoose.model("booking", bookingSchema);
+const Booking = mongoose.models.booking || mongoose.model("booking", bookingSchema);
 
 module.exports = Booking;

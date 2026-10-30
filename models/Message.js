@@ -14,7 +14,7 @@ const messageSchema = new mongoose.Schema({
         lat: Number,
         lng: Number,
         cityName: String,
-        postId: { type: mongoose.Schema.Types.ObjectId, ref: 'post' } // If sharing a specific experience
+        experienceId: { type: mongoose.Schema.Types.ObjectId, ref: 'experience' }
     },
     read: { type: Boolean, default: false },
     attachments: [{
@@ -28,6 +28,6 @@ messageSchema.index({ conversationId: 1, createdAt: 1 });
 messageSchema.index({ sender: 1 });
 messageSchema.index({ recipient: 1, read: 1 });
 
-const Message = mongoose.model("message", messageSchema);
+const Message = mongoose.models.message || mongoose.model("message", messageSchema);
 
 module.exports = Message;

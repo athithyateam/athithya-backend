@@ -1,5 +1,5 @@
 const { WishlistSchedule } = require("../db/mongoose");
-const { sendHtmlEmail } = require("./emailService");
+const { sendHtmlEmail } = require("../services/emailService");
 const { notificationService } = require("../services/notificationService");
 
 /**
@@ -18,23 +18,26 @@ function startWishlistReminderWorker(app) {
                 scheduledDateTime: { $lte: now }
             })
             .populate('user', 'firstname lastname email')
+            .populate('experience', 'title photos images')
             .populate('post', 'title photos images');
 
             if (!dueSchedules || dueSchedules.length === 0) return;
 
             for (const sch of dueSchedules) {
-                if (!sch.user || !sch.post) {
+                const experienceObj = sch.experience || sch.post;
+                if (!sch.user || !experienceObj) {
                     await WishlistSchedule.findByIdAndDelete(sch._id);
                     continue;
                 }
 
                 const dateStr = sch.scheduledDate;
                 const timeStr = sch.scheduledTime;
-                const postTitle = sch.post.title || "Experience";
+                const expTitle = experienceObj.title || "Experience";
                 const guestName = sch.user.firstname || "guest";
+                const expId = experienceObj._id;
 
                 // 1. Send In-App Bell Notification via NotificationService
-                const notifMessage = `Dear guest ${guestName}, your scheduled experience "${postTitle}" for ${dateStr} at ${timeStr} has arrived! Click here to open and book your trip.`;
+                const notifMessage = `Dear guest ${guestName}, your scheduled experience "${expTitle}" for ${dateStr} at ${timeStr} has arrived! Click here to open and book your trip.`;
 
                 try {
                     await notificationService.sendNotification({
@@ -43,8 +46,8 @@ function startWishlistReminderWorker(app) {
                         title: "Scheduled Experience Reminder",
                         message: notifMessage,
                         type: 'info',
-                        link: `/post/${sch.post._id}`,
-                        metadata: { postId: sch.post._id }
+                        link: `/experience/${expId}`,
+                        metadata: { experienceId: expId, postId: expId }
                     });
                 } catch (notifErr) {
                     console.error("Failed to create reminder bell notification:", notifErr);
@@ -52,9 +55,9 @@ function startWishlistReminderWorker(app) {
 
                 // 2. Send Reminder Email
                 if (sch.user.email) {
-                    const emailSubject = `Reminder: Scheduled Experience - ${postTitle}`;
+                    const emailSubject = `Reminder: Scheduled Experience - ${expTitle}`;
                     const baseUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-                    const postUrl = `${baseUrl}/post/${sch.post._id}`;
+                    const expUrl = `${baseUrl}/experience/${expId}`;
 
                     const emailHtml = `
                         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 16px; background-color: #ffffff;">
@@ -64,13 +67,13 @@ function startWishlistReminderWorker(app) {
                             <div style="padding: 30px 25px;">
                                 <h2 style="color: #111827; margin-top: 0; font-size: 20px;">Scheduled Experience Reminder</h2>
                                 <p style="color: #374151; font-size: 15px; line-height: 1.6; margin-bottom: 20px;">
-                                    Dear guest <strong>${guestName}</strong>, your scheduled experience <strong>"${postTitle}"</strong> for <strong>${dateStr}</strong> at <strong>${timeStr}</strong> has arrived!
+                                    Dear guest <strong>${guestName}</strong>, your scheduled experience <strong>"${expTitle}"</strong> for <strong>${dateStr}</strong> at <strong>${timeStr}</strong> has arrived!
                                 </p>
                                 <p style="color: #374151; font-size: 15px; line-height: 1.6; margin-bottom: 25px;">
                                     Click below to open the experience page and book your trip:
                                 </p>
                                 <div style="text-align: center; margin: 30px 0;">
-                                    <a href="${postUrl}" style="background-color: #C59A2F; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 12px; font-weight: 800; text-transform: uppercase; font-size: 13px; letter-spacing: 1.5px; display: inline-block;">View & Book Experience</a>
+                                    <a href="${expUrl}" style="background-color: #C59A2F; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 12px; font-weight: 800; text-transform: uppercase; font-size: 13px; letter-spacing: 1.5px; display: inline-block;">View & Book Experience</a>
                                 </div>
                                 <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
                                     Best regards,<br>

@@ -1,5 +1,5 @@
 import { User, Notification, HostDetails } from "../../db/mongoose";
-import { parseIfJson } from "../posts/postPayloadParser";
+import { parseIfJson } from "../experiences/experiencePayloadParser";
 import { sendTemplateEmail } from "../emailService";
 import { notificationService } from "../notificationService";
 import { otpService as defaultOtpService, OtpService, normalizePhoneNumber } from "../otpService";

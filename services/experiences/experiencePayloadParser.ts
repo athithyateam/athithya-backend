@@ -1,11 +1,9 @@
 /**
- * Post Payload Parser & Common Utilities
- * Reusable parsing, calculation, and filtering utilities for posts and cross-service domain logic.
+ * Experience Payload Parser & Common Utilities
+ * Reusable parsing, calculation, and filtering utilities for experiences and cross-service domain logic.
  */
 
-export interface GetPostsOptions {
-    postType?: string;
-    userRole?: string;
+export interface GetExperiencesOptions {
     city?: string;
     country?: string;
     state?: string;
@@ -18,21 +16,21 @@ export interface GetPostsOptions {
     page?: number | string;
     limit?: number | string;
     sort?: string;
-    postTypeFilter?: string | string[];
+    categoryFilter?: string | string[];
 }
 
-export interface PaginatedPostsResult {
+export interface PaginatedExperiencesResult {
     count: number;
     total: number;
     page: number;
     totalPages: number;
-    posts: any[];
+    experiences: any[];
 }
 
-export interface PostDetailResult {
-    post: any;
+export interface ExperienceDetailResult {
+    experience: any;
     reviews: { count: number; data: any[] };
-    similarPosts: any[];
+    similarExperiences: any[];
 }
 
 export interface GetTopRatedTreksOptions {
@@ -68,8 +66,7 @@ export interface NearbyTreksResult {
     treks: any[];
 }
 
-export interface GetPendingPostsOptions {
-    postType?: string;
+export interface GetPendingExperiencesOptions {
     page?: number | string;
     limit?: number | string;
 }
@@ -82,7 +79,7 @@ export interface CategoryActivityResult {
     isNew: boolean;
 }
 
-export interface NormalizedPostFields {
+export interface NormalizedExperienceFields {
     title?: string;
     subtitle?: string;
     description?: string;
@@ -98,12 +95,11 @@ export interface NormalizedPostFields {
     season?: any;
     difficulty?: string;
     isFeatured?: boolean;
-    plan?: any;
     availability?: any;
 }
 
-/** Standard projection for listing cards */
-export const LISTING_CARD_PROJECTION = "title subtitle postType photos location price duration difficulty categories discounts isFeatured status rating bookingCount savesCount clicks user createdAt approvedAt";
+/** Standard projection for experience listing cards */
+export const LISTING_CARD_PROJECTION = "title subtitle photos location price duration difficulty categories discounts isFeatured status rating bookingCount savesCount clicks user createdAt approvedAt";
 
 /** Helper to parse JSON fields sent as strings in form-data */
 export function parseIfJson(value: any): any {
@@ -179,7 +175,7 @@ export function isValidS3MediaUrl(item: any, bucketName: string = process.env.AW
     return urlStr.includes("amazonaws.com") && urlStr.includes(bucketName);
 }
 
-/** Standard tier-based platform fee calculation (used across posts and bookings) */
+/** Standard tier-based platform fee calculation */
 export function getPlatformFeeRate(basePrice: number): number {
     return basePrice < 2000 ? 0.05 : basePrice <= 5000 ? 0.035 : 0.02;
 }
@@ -221,25 +217,25 @@ export async function recordHostAuditLog(
 
 export const recordHostHistory = recordHostAuditLog;
 
-/** Parse and normalize post form-data and JSON fields */
-export function parsePostPayload(payload: any, basePost: any = null): NormalizedPostFields {
+/** Parse and normalize experience form-data and JSON fields */
+export function parseExperiencePayload(payload: any, baseExperience: any = null): NormalizedExperienceFields {
     const {
         title, subtitle, description, longDescription, location,
         price, amenities, capacity, availability,
-        planName, priceTotal, pricePerPerson, maxPeople,
+        priceTotal, pricePerPerson, maxPeople,
         duration, difficulty, categories, isFeatured,
         city, state, country, meetingPoint, days, nights, period, minutes, hours,
         privacyPolicy, discounts, season
     } = payload;
 
-    const fields: NormalizedPostFields = {};
+    const fields: NormalizedExperienceFields = {};
     if (title !== undefined) fields.title = title;
     if (subtitle !== undefined) fields.subtitle = subtitle;
     if (description !== undefined) fields.description = description;
     if (longDescription !== undefined) fields.longDescription = longDescription;
 
     // Location
-    const baseLoc = basePost?.location || {};
+    const baseLoc = baseExperience?.location || {};
     const locObj = { ...baseLoc, ...(parseIfJson(location) || {}) };
     if (city !== undefined) locObj.city = city;
     if (state !== undefined) locObj.state = state;
@@ -255,21 +251,21 @@ export function parsePostPayload(payload: any, basePost: any = null): Normalized
     if (Object.keys(locObj).length > 0) fields.location = locObj;
 
     // Price
-    const basePrice = basePost?.price || {};
+    const basePrice = baseExperience?.price || {};
     const priceObj = { ...basePrice, ...(parseIfJson(price) || {}) };
     if (priceTotal !== undefined && priceTotal !== "") priceObj.total = Number(priceTotal);
     if (pricePerPerson !== undefined && pricePerPerson !== "") priceObj.perPerson = Number(pricePerPerson);
     if (period !== undefined) priceObj.period = period;
     if (Object.keys(priceObj).length > 0) fields.price = priceObj;
 
-    // Capacity
-    const baseCap = basePost?.capacity || {};
+    // Capacity (guests, maxPeople)
+    const baseCap = baseExperience?.capacity || {};
     const capObj = { ...baseCap, ...(parseIfJson(capacity) || {}) };
     if (maxPeople !== undefined && maxPeople !== "") capObj.maxPeople = Number(maxPeople);
     if (Object.keys(capObj).length > 0) fields.capacity = capObj;
 
-    // Duration
-    const baseDur = basePost?.duration || {};
+    // Duration (days, nights, hours, minutes)
+    const baseDur = baseExperience?.duration || {};
     const durObj = { ...baseDur, ...(parseIfJson(duration) || {}) };
     if (payload.minutes !== undefined || minutes !== undefined) durObj.minutes = Number(payload.minutes ?? minutes);
     if (payload.hours !== undefined || hours !== undefined) durObj.hours = Number(payload.hours ?? hours);
@@ -285,16 +281,15 @@ export function parsePostPayload(payload: any, basePost: any = null): Normalized
     if (difficulty !== undefined) fields.difficulty = difficulty || undefined;
     if (availability !== undefined) fields.availability = parseIfJson(availability);
     if (isFeatured !== undefined) fields.isFeatured = isFeatured === 'true' || isFeatured === true;
-    if (planName) fields.plan = { ...(basePost?.plan || {}), name: planName };
 
     return fields;
 }
 
-/** Build standard query filter from GetPostsOptions */
-export function buildPostsFilter(options: GetPostsOptions): any {
+/** Build standard query filter from GetExperiencesOptions */
+export function buildExperiencesFilter(options: GetExperiencesOptions): any {
     const {
-        postType, userRole, city, country, state, minPrice, maxPrice, status,
-        difficulty, categories, isFeatured, postTypeFilter
+        city, country, state, minPrice, maxPrice, status,
+        difficulty, categories, isFeatured
     } = options;
 
     const filter: any = {
@@ -302,13 +297,6 @@ export function buildPostsFilter(options: GetPostsOptions): any {
         isHidden: { $ne: true }
     };
 
-    if (postType) {
-        filter.postType = postType.includes(",") ? { $in: postType.split(",") } : postType;
-    } else if (postTypeFilter) {
-        filter.postType = Array.isArray(postTypeFilter) ? { $in: postTypeFilter } : postTypeFilter;
-    }
-
-    if (userRole) filter.userRole = userRole;
     if (city) filter["location.city"] = new RegExp(city, "i");
     if (state) filter["location.state"] = new RegExp(state, "i");
     if (country) filter["location.country"] = new RegExp(country, "i");
@@ -380,8 +368,8 @@ module.exports = {
     calculatePricingAndFees,
     recordHostAuditLog,
     recordHostHistory,
-    parsePostPayload,
-    buildPostsFilter,
+    parseExperiencePayload,
+    buildExperiencesFilter,
     roundRobinMerge,
     cleanupMediaAssets,
     deleteMediaAssets

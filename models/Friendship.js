@@ -20,6 +20,6 @@ friendshipSchema.index({ user: 1, friend: 1 }, { unique: true });
 // Optimize paginated retrieval of a user's friends sorted by newest
 friendshipSchema.index({ user: 1, createdAt: -1 });
 
-const Friendship = mongoose.model("friendship", friendshipSchema);
+const Friendship = mongoose.models.friendship || mongoose.model("friendship", friendshipSchema);
 
 module.exports = Friendship;

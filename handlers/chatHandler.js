@@ -172,18 +172,6 @@ const clearConversation = async (req, res) => {
     }
 };
 
-// UPDATE Itinerary (Add/Remove Pin)
-const updateChatItinerary = async (req, res) => {
-    try {
-        const { lat, lng, cityName, postId, action } = req.body;
-        const itinerary = await chatService.updateItinerary(req.params.conversationId, req.user.userId, action, { lat, lng, cityName, postId });
-        res.status(200).json({ success: true, itinerary });
-    } catch (error) {
-        console.error("Update itinerary error:", error);
-        res.status(error.statusCode || 500).json({ success: false, message: error.message || "Error updating itinerary" });
-    }
-};
-
 module.exports = {
     getChatEligibility,
     sendMessageAttachments,
@@ -197,6 +185,5 @@ module.exports = {
     sendMessage,
     markConversationAsRead,
     deleteMessage,
-    clearConversation,
-    updateChatItinerary
+    clearConversation
 };

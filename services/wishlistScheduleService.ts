@@ -1,8 +1,8 @@
 import mongoose from "mongoose";
-import { WishlistSchedule, Post, User } from "../db/mongoose";
+const { WishlistSchedule, Experience, User } = require("../db/mongoose");
 
 export interface ScheduleWishlistInput {
-    postId: string;
+    experienceId: string;
     scheduledDate: string;
     scheduledTime: string;
 }
@@ -12,33 +12,33 @@ export class WishlistScheduleService {
     private static instanceKey = Symbol("WishlistScheduleServiceInstanceKey");
 
     private wishlistScheduleModel: any;
-    private postModel: any;
+    private experienceModel: any;
     private userModel: any;
 
     constructor(
         instanceKey: symbol,
         wishlistScheduleModel: any = WishlistSchedule,
-        postModel: any = Post,
+        experienceModel: any = Experience,
         userModel: any = User
     ) {
         if (instanceKey !== WishlistScheduleService.instanceKey) {
             throw new Error("Please use WishlistScheduleService.getInstance() to retrieve or create an instance");
         }
         this.wishlistScheduleModel = wishlistScheduleModel;
-        this.postModel = postModel;
+        this.experienceModel = experienceModel;
         this.userModel = userModel;
     }
 
     public static getInstance(
         wishlistScheduleModel?: any,
-        postModel?: any,
+        experienceModel?: any,
         userModel?: any
     ): WishlistScheduleService {
         if (!this.instance) {
             this.instance = new WishlistScheduleService(
                 this.instanceKey,
                 wishlistScheduleModel || WishlistSchedule,
-                postModel || Post,
+                experienceModel || Experience,
                 userModel || User
             );
         }
@@ -55,15 +55,16 @@ export class WishlistScheduleService {
             throw err;
         }
 
-        const { postId, scheduledDate, scheduledTime } = input;
-        if (!postId || !scheduledDate || !scheduledTime) {
-            const err: any = new Error("Post ID, date, and time are required");
+        const expId = input.experienceId;
+        const { scheduledDate, scheduledTime } = input;
+        if (!expId || !scheduledDate || !scheduledTime) {
+            const err: any = new Error("Experience ID, date, and time are required");
             err.statusCode = 400;
             throw err;
         }
 
-        const post = await this.postModel.findById(postId);
-        if (!post) {
+        const experience = await this.experienceModel.findById(expId);
+        if (!experience) {
             const err: any = new Error("Experience not found");
             err.statusCode = 404;
             throw err;
@@ -85,7 +86,7 @@ export class WishlistScheduleService {
             throw err;
         }
 
-        let schedule = await this.wishlistScheduleModel.findOne({ user: userId, post: postId });
+        let schedule = await this.wishlistScheduleModel.findOne({ user: userId, $or: [{ experience: expId }, { post: expId }] });
         if (schedule) {
             schedule.scheduledDate = scheduledDate;
             schedule.scheduledTime = scheduledTime;
@@ -95,8 +96,8 @@ export class WishlistScheduleService {
         } else {
             schedule = await this.wishlistScheduleModel.create({
                 user: userId,
-                post: postId,
-                postType: post.postType || 'experience',
+                experience: expId,
+                post: expId,
                 scheduledDate,
                 scheduledTime,
                 scheduledDateTime: targetDateTime,
@@ -104,7 +105,10 @@ export class WishlistScheduleService {
             });
         }
 
-        await schedule.populate('post', 'title photos images price location rating reviewCount postType');
+        await schedule.populate([
+            { path: 'experience', select: 'title photos images price location rating reviewCount' },
+            { path: 'post', select: 'title photos images price location rating reviewCount' }
+        ]);
         return schedule;
     }
 
@@ -116,19 +120,22 @@ export class WishlistScheduleService {
             user: userId,
             status: 'scheduled'
         })
-        .populate('post', 'title photos images price location rating reviewCount postType clicks')
+        .populate('experience', 'title photos images price location rating reviewCount clicks')
+        .populate('post', 'title photos images price location rating reviewCount clicks')
         .sort({ scheduledDateTime: 1 });
     }
 
     /**
      * Check if the logged-in user has a scheduled wishlist item for a specific post
      */
-    public async checkWishlistScheduleStatus(userId: string, postId: string): Promise<any> {
+    public async checkWishlistScheduleStatus(userId: string, targetId: string): Promise<any> {
         return await this.wishlistScheduleModel.findOne({
             user: userId,
-            post: postId,
+            $or: [{ experience: targetId }, { post: targetId }],
             status: 'scheduled'
-        }).populate('post', 'title photos images price location rating reviewCount postType');
+        })
+        .populate('experience', 'title photos images price location rating reviewCount')
+        .populate('post', 'title photos images price location rating reviewCount');
     }
 
     /**

@@ -1,6 +1,6 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
-const { connectDB, Post, HostPersonalMedia, User } = require('../db/mongoose');
+const { connectDB, Experience, HostPersonalMedia, User } = require('../db/mongoose');
 const { getDriveClient } = require('../clients/googleDriveClient');
 const { ensureFolderStructure, uploadMediaToDrive } = require('../services/googleDriveService');
 
@@ -39,16 +39,16 @@ async function syncAllMediaToDrive() {
     let momentosUploaded = 0;
 
     // 1. SYNC EXPERIENCES MEDIA
-    console.log("🔍 Scanning Experiences / Posts media...");
-    const posts = await Post.find({
+    console.log("🔍 Scanning Experiences media...");
+    const experiences = await Experience.find({
         $or: [
             { 'photos.0': { $exists: true } },
             { 'videos.0': { $exists: true } }
         ]
     });
 
-    console.log(`Found ${posts.length} experience posts.`);
-    for (const post of posts) {
+    console.log(`Found ${experiences.length} experiences.`);
+    for (const post of experiences) {
         let postModified = false;
 
         // Photos

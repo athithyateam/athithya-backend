@@ -12,8 +12,8 @@ router.post("/send-friend-invite", checkAuth, groupBookingHandler.sendFriendInvi
 /**
  * API: Remove an invited friend - Multi-method support for live client stability
  */
-router.delete("/post/:postId/invite/:friendId", checkAuth, groupBookingHandler.removeInvitedFriend);
-router.post("/post/:postId/invite/:friendId/remove", checkAuth, groupBookingHandler.removeInvitedFriend);
+router.delete("/experience/:experienceId/invite/:friendId", checkAuth, groupBookingHandler.removeInvitedFriend);
+router.post("/experience/:experienceId/invite/:friendId/remove", checkAuth, groupBookingHandler.removeInvitedFriend);
 
 /**
  * API: Get my initiated group bookings
@@ -38,7 +38,7 @@ router.post("/:id/respond", checkAuth, groupBookingHandler.respondToInvite);
 /**
  * API: Get group booking session status
  */
-router.get("/post/:postId/status", checkOptionalAuth, groupBookingHandler.getGroupBookingStatus);
+router.get("/experience/:experienceId/status", checkOptionalAuth, groupBookingHandler.getGroupBookingStatus);
 
 /**
  * API: Delete experience group session

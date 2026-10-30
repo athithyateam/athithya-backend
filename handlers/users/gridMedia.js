@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const { User, Post, HostPersonalMedia, HostPinnedExperienceMedia } = require("../../db/mongoose");
+const { User, Experience, HostPersonalMedia, HostPinnedExperienceMedia } = require("../../db/mongoose");
 const { deleteFile } = require("../../services/storageService");
 const { notificationService } = require("../../services/notificationService");
 
@@ -18,13 +18,13 @@ exports.getHostGridMedia = async (req, res) => {
         const pinnedDocs = await HostPinnedExperienceMedia.find({ user: userId }).select("mediaKey");
         const pinnedExperienceKeys = pinnedDocs.map(d => d.mediaKey);
 
-        // 1. Fetch experience posts media (from active experience/service/trek posts)
-        const posts = await Post.find({ user: userId, status: "active" }).sort({ createdAt: -1 });
+        // 1. Fetch experience media (from active experiences)
+        const experiences = await Experience.find({ user: userId, status: "active" }).sort({ createdAt: -1 });
 
         const rawExperienceMedia = [];
-        for (const post of posts) {
-            if (post.photos && Array.isArray(post.photos)) {
-                for (const photo of post.photos) {
+        for (const exp of experiences) {
+            if (exp.photos && Array.isArray(exp.photos)) {
+                for (const photo of exp.photos) {
                     if (photo && photo.url) {
                         const key = photo.public_id || photo.url;
                         rawExperienceMedia.push({
@@ -33,16 +33,16 @@ exports.getHostGridMedia = async (req, res) => {
                             url: photo.url,
                             public_id: photo.public_id || "",
                             mediaType: "image",
-                            title: post.title,
-                            postId: post._id,
+                            title: exp.title,
+                            experienceId: exp._id,
                             isPinned: pinnedExperienceKeys.includes(key),
-                            createdAt: post.createdAt
+                            createdAt: exp.createdAt
                         });
                     }
                 }
             }
-            if (post.videos && Array.isArray(post.videos)) {
-                for (const video of post.videos) {
+            if (exp.videos && Array.isArray(exp.videos)) {
+                for (const video of exp.videos) {
                     if (video && video.url) {
                         const key = video.public_id || video.url;
                         rawExperienceMedia.push({
@@ -51,10 +51,10 @@ exports.getHostGridMedia = async (req, res) => {
                             url: video.url,
                             public_id: video.public_id || "",
                             mediaType: "video",
-                            title: post.title,
-                            postId: post._id,
+                            title: exp.title,
+                            experienceId: exp._id,
                             isPinned: pinnedExperienceKeys.includes(key),
-                            createdAt: post.createdAt
+                            createdAt: exp.createdAt
                         });
                     }
                 }
