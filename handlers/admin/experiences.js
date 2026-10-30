@@ -1,4 +1,5 @@
-const { Experience, Booking, Notification, HostAuditLog, User, SavedExperience, Review } = require("../../db/mongoose");
+const { Experience, Booking, Notification, HostAuditLog, User, SavedExperience } = require("../../db/mongoose");
+const { reviewService } = require("../../services/reviewService");
 const { deleteFile } = require("../../services/storageService");
 const { sendHtmlEmail } = require("../../services/emailService");
 const { notificationService } = require("../../services/notificationService");
@@ -208,7 +209,7 @@ exports.updateExperienceStatus = async (req, res) => {
 
                 // ── 3. Clean bookmarks and reviews, then delete experience ──
                 await SavedExperience.deleteMany({ experience: experience._id });
-                await Review.deleteMany({ experience: experience._id });
+                await reviewService.deleteExperienceReviews(experience._id);
                 await Experience.findByIdAndDelete(experience._id);
 
                 await notificationService.sendNotification({
@@ -467,7 +468,7 @@ exports.deleteExperience = async (req, res) => {
         });
 
         await SavedExperience.deleteMany({ experience: req.params.id });
-        await Review.deleteMany({ experience: req.params.id });
+        await reviewService.deleteExperienceReviews(req.params.id);
         await Experience.findByIdAndDelete(req.params.id);
         res.json({ success: true, message: "Experience deleted successfully" });
     } catch (err) {

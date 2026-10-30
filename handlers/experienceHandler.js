@@ -16,11 +16,11 @@ const {
 } = require("./experiences/experienceQuery");
 const { getPresignedUrl } = require("./experiences/experiencePresigned");
 const { saveExperience, unsaveExperience } = require("./experiences/experienceSave");
-const { experienceService } = require("../services/experienceService");
+const { reviewService } = require("../services/reviewService");
 
 const getExperienceReviews = async (req, res) => {
     try {
-        const reviews = await experienceService.getExperienceReviews(req.params.experienceId || req.params.id);
+        const reviews = await reviewService.getExperienceReviews(req.params.experienceId || req.params.id);
         return res.status(200).json({ success: true, count: reviews.length, data: reviews });
     } catch (error) {
         return res.status(error.statusCode || 500).json({ success: false, message: error.message || "Error fetching reviews" });

@@ -1,3 +1,4 @@
+const auth = require("../routes/auth");
 const users = require("../routes/users");
 const experiences = require("../routes/experiences");
 const reviews = require("../routes/reviews");
@@ -12,6 +13,7 @@ const admin = require("../routes/admin");
 const adminHandler = require("../handlers/adminHandler");
 
 module.exports = {
+  auth,
   users,
   experiences,
   reviews,

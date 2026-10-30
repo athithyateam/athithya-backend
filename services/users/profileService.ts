@@ -1,10 +1,15 @@
 import mongoose from "mongoose";
-const { User, Experience, Review, Notification, HostDetails, HostAuditLog, Friendship, FriendRequest, SavedExperience } = require("../../db/mongoose");
+const { 
+    User, Experience, Notification, HostDetails, HostAuditLog, 
+    Friendship, FriendRequest, SavedExperience, Booking, Conversation, 
+    Message, HostPinnedExperienceMedia, WishlistSchedule 
+} = require("../../db/mongoose");
 import { deleteFile } from "../storageService";
 import { parseIfJson, recordHostAuditLog } from "../experiences/experiencePayloadParser";
 import { sendTemplateEmail } from "../emailService";
 import { notificationService } from "../notificationService";
 import { normalizePhoneNumber, renderDocumentListHtml } from "./verificationService";
+import { reviewService as defaultReviewService, ReviewService } from "../reviewService";
 
 export interface LocationData {
     latitude: number | string;
@@ -21,13 +26,18 @@ export class ProfileService {
 
     private userModel: any;
     private experienceModel: any;
-    private reviewModel: any;
     private notificationModel: any;
     private hostDetailsModel: any;
     private hostAuditLogModel: any;
     private friendshipModel: any;
     private friendRequestModel: any;
     private savedExperienceModel: any;
+    private bookingModel: any;
+    private conversationModel: any;
+    private messageModel: any;
+    private pinnedExperienceMediaModel: any;
+    private wishlistScheduleModel: any;
+    private reviewService: ReviewService;
     private fileDeleter: (key: string) => Promise<any>;
     private emailNotifier: (options: any) => Promise<any>;
 
@@ -35,7 +45,6 @@ export class ProfileService {
         instanceKey: symbol,
         userModel: any = User,
         experienceModel: any = Experience,
-        reviewModel: any = Review,
         notificationModel: any = Notification,
         hostDetailsModel: any = HostDetails,
         hostAuditLogModel: any = HostAuditLog,
@@ -43,14 +52,19 @@ export class ProfileService {
         friendRequestModel: any = FriendRequest,
         savedExperienceModel: any = SavedExperience,
         fileDeleter: (key: string) => Promise<any> = deleteFile,
-        emailNotifier: (options: any) => Promise<any> = sendTemplateEmail
+        emailNotifier: (options: any) => Promise<any> = sendTemplateEmail,
+        reviewService: ReviewService = defaultReviewService,
+        bookingModel: any = Booking,
+        conversationModel: any = Conversation,
+        messageModel: any = Message,
+        pinnedExperienceMediaModel: any = HostPinnedExperienceMedia,
+        wishlistScheduleModel: any = WishlistSchedule
     ) {
         if (instanceKey !== ProfileService.instanceKey) {
             throw new Error("Please use ProfileService.getInstance() to retrieve or create an instance");
         }
         this.userModel = userModel;
         this.experienceModel = experienceModel;
-        this.reviewModel = reviewModel;
         this.notificationModel = notificationModel;
         this.hostDetailsModel = hostDetailsModel;
         this.hostAuditLogModel = hostAuditLogModel;
@@ -59,12 +73,17 @@ export class ProfileService {
         this.savedExperienceModel = savedExperienceModel;
         this.fileDeleter = fileDeleter;
         this.emailNotifier = emailNotifier;
+        this.reviewService = reviewService;
+        this.bookingModel = bookingModel;
+        this.conversationModel = conversationModel;
+        this.messageModel = messageModel;
+        this.pinnedExperienceMediaModel = pinnedExperienceMediaModel;
+        this.wishlistScheduleModel = wishlistScheduleModel;
     }
 
     public static getInstance(
         userModel?: any,
         experienceModel?: any,
-        reviewModel?: any,
         notificationModel?: any,
         hostDetailsModel?: any,
         hostAuditLogModel?: any,
@@ -72,14 +91,19 @@ export class ProfileService {
         friendRequestModel?: any,
         savedExperienceModel?: any,
         fileDeleter?: (key: string) => Promise<any>,
-        emailNotifier?: (options: any) => Promise<any>
+        emailNotifier?: (options: any) => Promise<any>,
+        reviewService?: ReviewService,
+        bookingModel?: any,
+        conversationModel?: any,
+        messageModel?: any,
+        pinnedExperienceMediaModel?: any,
+        wishlistScheduleModel?: any
     ): ProfileService {
         if (!this.instance) {
             this.instance = new ProfileService(
                 this.instanceKey,
                 userModel || User,
                 experienceModel || Experience,
-                reviewModel || Review,
                 notificationModel || Notification,
                 hostDetailsModel || HostDetails,
                 hostAuditLogModel || HostAuditLog,
@@ -87,7 +111,13 @@ export class ProfileService {
                 friendRequestModel || FriendRequest,
                 savedExperienceModel || SavedExperience,
                 fileDeleter || deleteFile,
-                emailNotifier || sendTemplateEmail
+                emailNotifier || sendTemplateEmail,
+                reviewService || defaultReviewService,
+                bookingModel || Booking,
+                conversationModel || Conversation,
+                messageModel || Message,
+                pinnedExperienceMediaModel || HostPinnedExperienceMedia,
+                wishlistScheduleModel || WishlistSchedule
             );
         }
         return this.instance;
@@ -124,51 +154,7 @@ export class ProfileService {
         return { isFriend: !!isFriend, isRequestedFriend: !!isRequestedFriend };
     }
 
-    /**
-     * Helper: Calculate host review statistics, distribution, and current user rating
-     */
-    public async calculateHostReviewStats(hostId: string, currentUserId?: string): Promise<{
-        reviews: any[];
-        reviewStats: any;
-    }> {
-        const hostObjectId = new mongoose.Types.ObjectId(hostId);
-        const allHostReviews = await this.reviewModel.find({ host: hostId })
-            .populate('reviewer', 'firstname lastname avatar')
-            .populate('post', 'title')
-            .sort({ createdAt: -1 });
 
-        const writtenReviews = allHostReviews.filter((r: any) => r.comment && r.comment.trim() !== "");
-
-        const totalStats = await this.reviewModel.aggregate([
-            { $match: { host: hostObjectId } },
-            { $group: { _id: '$host', average: { $avg: '$rating' }, count: { $sum: 1 } } }
-        ]);
-
-        let reviewStats: any = null;
-        if (totalStats.length > 0) {
-            const avg = totalStats[0].average || 0;
-            const currentUserIdStr = currentUserId?.toString();
-            const userRatingObj = currentUserIdStr
-                ? await this.reviewModel.findOne({ host: hostId, reviewer: currentUserIdStr, post: null })
-                : null;
-
-            reviewStats = {
-                totalRatings: totalStats[0].count,
-                totalReviews: writtenReviews.length,
-                averageRating: Number(avg.toFixed(1)),
-                currentUserRating: userRatingObj ? userRatingObj.rating : null,
-                ratings: {
-                    5: allHostReviews.filter((r: any) => r.rating === 5).length,
-                    4: allHostReviews.filter((r: any) => r.rating === 4).length,
-                    3: allHostReviews.filter((r: any) => r.rating === 3).length,
-                    2: allHostReviews.filter((r: any) => r.rating === 2).length,
-                    1: allHostReviews.filter((r: any) => r.rating === 1).length
-                }
-            };
-        }
-
-        return { reviews: writtenReviews, reviewStats };
-    }
 
     /**
      * Record host's previous details to HostAuditLog collection (scoped per host)
@@ -401,30 +387,7 @@ export class ProfileService {
         return result.deletedCount > 0;
     }
 
-    /**
-     * Service: Calculate host rating statistics (average and count)
-     */
-    public async getHostRating(hostId: string): Promise<{ average: number; count: number }> {
-        if (!hostId) return { average: 0, count: 0 };
-        const hostObjectId = new mongoose.Types.ObjectId(hostId);
-        const hostExperiences = await this.experienceModel.find({ user: hostObjectId }).select('_id');
-        const hostExperienceIds = hostExperiences.map((p: any) => p._id);
-        const baseMatch = hostExperienceIds.length > 0
-            ? { $or: [{ host: hostObjectId }, { experience: { $in: hostExperienceIds } }] }
-            : { host: hostObjectId };
 
-        const hostStats = await this.reviewModel.aggregate([
-            { $match: baseMatch },
-            { $group: { _id: null, average: { $avg: '$rating' }, count: { $sum: 1 } } }
-        ]);
-        if (hostStats.length > 0) {
-            return {
-                average: Math.round(hostStats[0].average * 10) / 10,
-                count: hostStats[0].count
-            };
-        }
-        return { average: 0, count: 0 };
-    }
 
     /**
      * Service: Get user profile with posts and ratings
@@ -476,7 +439,7 @@ export class ProfileService {
         let reviews: any[] = [];
         let reviewStats: any = null;
         if (user.role === 'host') {
-            const stats = await this.calculateHostReviewStats(userId, currentUserId);
+            const stats = await this.reviewService.calculateHostReviewStats(userId, currentUserId);
             reviews = stats.reviews.slice(0, 10);
             reviewStats = stats.reviewStats;
         }
@@ -527,15 +490,12 @@ export class ProfileService {
 
         const experiences = await this.experienceModel.find({ user: userId, status: 'active' }).sort({ createdAt: -1 });
 
-        const reviewsWritten = await this.reviewModel.find({ reviewer: userId, comment: { $exists: true, $ne: "" } })
-            .populate('host', 'firstname lastname avatar')
-            .populate('experience', 'title')
-            .sort({ createdAt: -1 });
+        const reviewsWritten = await this.reviewService.getWrittenReviewsForProfile(userId);
 
         let reviewsReceived: any[] = [];
         let reviewStats: any = null;
         if (user.role === 'host') {
-            const stats = await this.calculateHostReviewStats(userId, currentUserId);
+            const stats = await this.reviewService.calculateHostReviewStats(userId, currentUserId);
             reviewsReceived = stats.reviews;
             reviewStats = stats.reviewStats;
         }
@@ -922,6 +882,84 @@ export class ProfileService {
             message: "Profile updated successfully",
             user: await this.getUserFields(user, true)
         };
+    }
+
+    /**
+     * Delete account and cascade delete all associated data across models and S3
+     */
+    public async deleteAccount(userId: string): Promise<void> {
+        const user = await this.userModel.findById(userId);
+        if (!user) {
+            const error: any = new Error("User not found");
+            error.statusCode = 404;
+            throw error;
+        }
+
+        // 1. Delete Avatar from S3
+        if (user.avatar && user.avatar.public_id) {
+            try { await this.fileDeleter(user.avatar.public_id); } catch (err) {}
+        }
+
+        // 2. Delete Host Documents (Aadhaar) from S3
+        const hostDoc = await this.hostDetailsModel.findOne({ user: userId });
+        if (hostDoc?.aadhaarCard) {
+            const docs = Array.isArray(hostDoc.aadhaarCard) ? hostDoc.aadhaarCard : [hostDoc.aadhaarCard];
+            for (const doc of docs) {
+                if (doc?.public_id) {
+                    try { await this.fileDeleter(doc.public_id); } catch (err) {}
+                }
+            }
+        }
+
+        // 3. Delete all Experiences and their media from S3
+        const userExperiences = await this.experienceModel.find({ user: userId });
+        for (const exp of userExperiences) {
+            if (exp.photos && Array.isArray(exp.photos)) {
+                for (const img of exp.photos) {
+                    if (img?.public_id) {
+                        try { await this.fileDeleter(img.public_id); } catch (err) {}
+                    }
+                }
+            }
+            if (exp.videos && Array.isArray(exp.videos)) {
+                for (const vid of exp.videos) {
+                    if (vid?.public_id) {
+                        try { await this.fileDeleter(vid.public_id); } catch (err) {}
+                    }
+                }
+            }
+        }
+        await this.experienceModel.deleteMany({ user: userId });
+
+        // 4. Delete Bookings (where user is host or guest)
+        await this.bookingModel.deleteMany({ $or: [{ guest: userId }, { host: userId }] });
+
+        // 5. Delete Reviews and recalculate affected experience ratings via ReviewService
+        await this.reviewService.cleanupUserReviews(userId);
+
+        // 6. Delete Notifications
+        await this.notificationModel.deleteMany({ $or: [{ recipient: userId }, { sender: userId }] });
+
+        // 7. Delete Conversations and Messages
+        const userConversations = await this.conversationModel.find({ participants: userId });
+        for (const conv of userConversations) {
+            await this.messageModel.deleteMany({ conversationId: conv._id });
+        }
+        await this.conversationModel.deleteMany({ participants: userId });
+
+        // 8. Clean up social relationships, requests, bookmarks, pinned media, wishlist schedules, host details, host audit logs
+        await Promise.all([
+            this.friendshipModel.deleteMany({ $or: [{ user: userId }, { friend: userId }] }),
+            this.friendRequestModel.deleteMany({ $or: [{ sender: userId }, { recipient: userId }] }),
+            this.savedExperienceModel.deleteMany({ user: userId }),
+            this.pinnedExperienceMediaModel.deleteMany({ user: userId }),
+            this.wishlistScheduleModel.deleteMany({ user: userId }),
+            this.hostDetailsModel.deleteOne({ user: userId }),
+            this.hostAuditLogModel.deleteMany({ hostId: userId })
+        ]);
+
+        // 9. Finally, delete the user record
+        await this.userModel.findByIdAndDelete(userId);
     }
 }
 

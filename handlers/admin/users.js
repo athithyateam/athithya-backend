@@ -1,4 +1,5 @@
-const { User, HostDetails, HostAuditLog, Review, Experience, Notification, Friendship, FriendRequest, SavedExperience, HostPinnedExperienceMedia, WishlistSchedule } = require("../../db/mongoose");
+const { User, HostDetails } = require("../../db/mongoose");
+const { profileService } = require("../../services/users/profileService");
 
 exports.getAllUsers = async (req, res) => {
     try {
@@ -145,49 +146,9 @@ exports.updateUserRole = async (req, res) => {
 exports.deleteUser = async (req, res) => {
     try {
         const userId = req.params.id;
-        const user = await User.findByIdAndDelete(userId);
-        if (!user) return res.status(404).json({ success: false, message: "User not found" });
-
-        // Purge all HostDetails and HostAuditLog audit records for this user
-        await HostDetails.deleteOne({ user: userId });
-        await HostAuditLog.deleteMany({ hostId: userId });
-
-        // Delete all Reviews submitted by this user or about this host, and recalculate ratings
-        const userSubmittedReviews = await Review.find({ reviewer: userId, $or: [{ experience: { $ne: null } }, { post: { $ne: null } }] });
-        const affectedExpIds = [...new Set(userSubmittedReviews.map(r => (r.experience || r.post)?.toString()).filter(Boolean))];
-
-        await Review.deleteMany({ $or: [{ reviewer: userId }, { host: userId }] });
-
-        for (const expId of affectedExpIds) {
-            try {
-                const remainingReviews = await Review.find({ $or: [{ experience: expId }, { post: expId }] });
-                const count = remainingReviews.length;
-                const average = count > 0 
-                    ? Math.round((remainingReviews.reduce((sum, r) => sum + r.rating, 0) / count) * 10) / 10 
-                    : 0;
-                await Experience.findByIdAndUpdate(expId, {
-                    'rating.average': average,
-                    'rating.count': count
-                });
-            } catch (calcErr) {
-                console.error("Error recalculating experience rating on admin user delete:", calcErr);
-            }
-        }
-
-        // Clean up notifications
-        await Notification.deleteMany({ $or: [{ recipient: userId }, { sender: userId }] });
-
-        // Clean up social connections, requests, bookmarks, pins, and wishlist schedules via indexed collections
-        await Promise.all([
-            Friendship.deleteMany({ $or: [{ user: userId }, { friend: userId }] }),
-            FriendRequest.deleteMany({ $or: [{ sender: userId }, { recipient: userId }] }),
-            SavedExperience.deleteMany({ user: userId }),
-            HostPinnedExperienceMedia.deleteMany({ user: userId }),
-            WishlistSchedule.deleteMany({ user: userId })
-        ]);
-
+        await profileService.deleteAccount(userId);
         res.json({ success: true, message: "User deleted successfully" });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        res.status(err.statusCode || 500).json({ success: false, message: err.message });
     }
 };

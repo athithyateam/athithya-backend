@@ -1,6 +1,6 @@
 /**
- * User Handler - Main Entry Point
- * This file is now modularized into smaller units in the ./users directory.
+ * User Handler - Unified Entry Point
+ * Modularized façade aggregating profile, verification, social, and grid media controllers.
  */
 
 const { 
@@ -11,13 +11,12 @@ const {
     getCompleteProfile, 
     getTopRatedHosts, 
     getUserById,
-    deleteMyAccount
+    deleteMyAccount,
+    getSavedExperiences
 } = require("./users/profile");
 
 const { submitHostVerification, sendPhoneOTP, verifyPhoneOTP } = require("./users/verification");
 
-
-const { getSavedExperiences } = require("./users/saved");
 const { 
     sendFriendRequest, 
     acceptFriendRequest, 
@@ -27,12 +26,18 @@ const {
     getGuests
 } = require("./users/social");
 
-module.exports = {
-    submitHostVerification,
-    sendPhoneOTP,
-    verifyPhoneOTP,
-    updateProfile,
+const {
+    getHostGridMedia,
+    updateGridTabPreference,
+    addPersonalMedia,
+    deletePersonalMedia,
+    togglePinPersonalMedia,
+    togglePinExperienceMedia
+} = require("./users/gridMedia");
 
+module.exports = {
+    // Profile & Account
+    updateProfile,
     updateLocation,
     getLocation,
     getProfile,
@@ -40,11 +45,26 @@ module.exports = {
     getTopRatedHosts,
     getUserById,
     getSavedExperiences,
+    deleteMyAccount,
+
+    // Verification
+    submitHostVerification,
+    sendPhoneOTP,
+    verifyPhoneOTP,
+
+    // Social & Friends
     sendFriendRequest,
     acceptFriendRequest,
     rejectFriendRequest,
     unfriend,
     getFriends,
     getGuests,
-    deleteMyAccount
+
+    // Host Grid Media
+    getHostGridMedia,
+    updateGridTabPreference,
+    addPersonalMedia,
+    deletePersonalMedia,
+    togglePinPersonalMedia,
+    togglePinExperienceMedia
 };

@@ -79,9 +79,6 @@ export class UserService {
         return this.profileService.removeSavedExperience(userId, experienceId);
     }
 
-    public async getHostRating(hostId: string): Promise<{ average: number; count: number }> {
-        return this.profileService.getHostRating(hostId);
-    }
 
     public async getProfile(
         userId: string,
@@ -112,6 +109,10 @@ export class UserService {
 
     public async updateProfile(userId: string, profileData: any): Promise<any> {
         return this.profileService.updateProfile(userId, profileData);
+    }
+
+    public async deleteAccount(userId: string): Promise<void> {
+        return this.profileService.deleteAccount(userId);
     }
 
     // Verification Sub-Service Delegations
@@ -181,7 +182,6 @@ export default UserService;
 export const addSavedExperience = (userId: string, experienceId: string) => userService.addSavedExperience(userId, experienceId);
 export const removeSavedExperience = (userId: string, experienceId: string) => userService.removeSavedExperience(userId, experienceId);
 export const getSavedExperiences = (userId: string) => userService.getSavedExperiences(userId);
-export const getHostRating = (hostId: string) => userService.getHostRating(hostId);
 
 // CommonJS compatibility
 module.exports = userService;
@@ -190,5 +190,4 @@ module.exports.userService = userService;
 module.exports.addSavedExperience = addSavedExperience;
 module.exports.removeSavedExperience = removeSavedExperience;
 module.exports.getSavedExperiences = getSavedExperiences;
-module.exports.getHostRating = getHostRating;
 module.exports.default = UserService;

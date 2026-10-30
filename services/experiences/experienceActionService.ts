@@ -1,10 +1,11 @@
-const { Experience, User, Notification, HostDetails, HostAuditLog, Booking, Review, SavedExperience } = require("../../db/mongoose");
+const { Experience, User, Notification, HostDetails, HostAuditLog, Booking, SavedExperience } = require("../../db/mongoose");
 const { storageService: defaultStorageService } = require("../storageService");
 const { googleDriveService: defaultGoogleDriveService } = require("../googleDriveService");
 const { emailService: defaultEmailService } = require("../emailService");
 import { notificationService } from "../notificationService";
 const defaultNotifyAdmins = (reqOrApp: any, payload?: any) => notificationService.notifyAdmins(payload || reqOrApp);
 const { userService: defaultUserService } = require("../userService");
+import { reviewService as defaultReviewService, ReviewService } from "../reviewService";
 import {
     parseExperiencePayload, calculatePricingAndFees, isValidS3MediaUrl, parseIfJson,
     buildCategoryFilter, attachDistanceToTreks, recordHostAuditLog, LISTING_CARD_PROJECTION,
@@ -30,7 +31,7 @@ export class ExperienceActionService {
     private hostAuditLogModel: any;
     private hostDetailsModel: any;
     private bookingModel: any;
-    private reviewModel: any;
+    private reviewService: ReviewService;
     private savedExperienceModel: any;
     private storageService: any;
     private googleDriveService: any;
@@ -40,10 +41,10 @@ export class ExperienceActionService {
 
     constructor(instanceKey: symbol, ...args: any[]) {
         if (instanceKey !== ExperienceActionService.instanceKey) throw new Error("Use ExperienceActionService.getInstance()");
-        const [em = Experience, um = User, nm = Notification, halm = HostAuditLog, bm = Booking, ss = defaultStorageService, gds = defaultGoogleDriveService, es = defaultEmailService, an = defaultNotifyAdmins, us = defaultUserService, rm = Review, hdm = HostDetails, sem = SavedExperience] = args;
+        const [em = Experience, um = User, nm = Notification, halm = HostAuditLog, bm = Booking, ss = defaultStorageService, gds = defaultGoogleDriveService, es = defaultEmailService, an = defaultNotifyAdmins, us = defaultUserService, rs = defaultReviewService, hdm = HostDetails, sem = SavedExperience] = args;
         this.experienceModel = em; this.userModel = um; this.notificationModel = nm; this.hostAuditLogModel = halm;
         this.bookingModel = bm; this.storageService = ss; this.googleDriveService = gds; this.emailService = es;
-        this.adminNotifier = an; this.userService = us; this.reviewModel = rm;
+        this.adminNotifier = an; this.userService = us; this.reviewService = rs;
         this.hostDetailsModel = hdm;
         this.savedExperienceModel = sem;
     }
@@ -286,7 +287,7 @@ export class ExperienceActionService {
         await deleteMediaAssets(this.storageService, this.googleDriveService, [...(experience.photos || []), ...(experience.videos || [])]);
         await this.bookingModel.updateMany({ experience: experienceId, status: { $in: ["pending", "accepted", "in_progress", "cancel_requested"] } }, { $set: { status: "cancelled" } });
         await this.savedExperienceModel.deleteMany({ experience: experienceId });
-        await this.reviewModel.deleteMany({ experience: experienceId });
+        await this.reviewService.deleteExperienceReviews(experienceId);
         await this.experienceModel.findByIdAndDelete(experienceId);
         return { success: true, message: "Experience deleted successfully" };
     }
@@ -360,9 +361,7 @@ export class ExperienceActionService {
                     { "location.city": experience.location?.city }
                 ]
             }).select(LISTING_CARD_PROJECTION).limit(6).lean(),
-            this.reviewModel.find({ experience: experienceId })
-                .populate("reviewer", "firstname lastname avatar")
-                .sort({ createdAt: -1 }).limit(10).lean()
+            this.reviewService.getExperienceReviews(experienceId, 10)
         ]);
 
         return {
@@ -510,13 +509,6 @@ export class ExperienceActionService {
         }));
 
         return results.sort((a, b) => new Date(b.latestApprovedAt).getTime() - new Date(a.latestApprovedAt).getTime());
-    }
-
-    public async getExperienceReviews(experienceId: string): Promise<any[]> {
-        return this.reviewModel.find({ experience: experienceId })
-            .populate("reviewer", "firstname lastname avatar")
-            .sort({ createdAt: -1 })
-            .lean();
     }
 }
 

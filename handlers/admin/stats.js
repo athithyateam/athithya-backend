@@ -1,11 +1,12 @@
-const { User, Experience, Booking, Review } = require("../../db/mongoose");
+const { User, Experience, Booking } = require("../../db/mongoose");
+const { reviewService } = require("../../services/reviewService");
 
 exports.getAdminStats = async (req, res) => {
     try {
         const totalUsers = await User.countDocuments();
         const totalExperiences = await Experience.countDocuments({ status: "active" });
         const totalBookings = await Booking.countDocuments({ status: { $nin: ["cancelled", "rejected"] } });
-        const totalReviews = await Review.countDocuments();
+        const totalReviews = await reviewService.countReviews();
 
         const roleCounts = await User.aggregate([
             { $group: { _id: "$role", count: { $sum: 1 } } }

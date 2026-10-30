@@ -137,10 +137,6 @@ export class ExperienceService {
     public async getCategoryActivity(): Promise<CategoryActivityResult[]> {
         return this.actionService.getCategoryActivity();
     }
-
-    public async getExperienceReviews(experienceId: string): Promise<any[]> {
-        return this.actionService.getExperienceReviews(experienceId);
-    }
 }
 
 export const experienceService = ExperienceService.getInstance();
@@ -161,7 +157,6 @@ export const getNearbyTreks = (options?: GetNearbyTreksOptions) => experienceSer
 export const getUserExperiences = (userId: string) => experienceService.getUserExperiences(userId);
 export const getPendingExperiences = (options?: GetPendingExperiencesOptions) => experienceService.getPendingExperiences(options);
 export const getCategoryActivity = () => experienceService.getCategoryActivity();
-export const getExperienceReviews = (experienceId: string) => experienceService.getExperienceReviews(experienceId);
 
 // CommonJS compatibility
 module.exports = experienceService;
@@ -182,7 +177,6 @@ module.exports.getNearbyTreks = getNearbyTreks;
 module.exports.getUserExperiences = getUserExperiences;
 module.exports.getPendingExperiences = getPendingExperiences;
 module.exports.getCategoryActivity = getCategoryActivity;
-module.exports.getExperienceReviews = getExperienceReviews;
 module.exports.calculatePricingAndFees = calculatePricingAndFees;
 module.exports.isValidS3MediaUrl = isValidS3MediaUrl;
 module.exports.parseExperiencePayload = parseExperiencePayload;

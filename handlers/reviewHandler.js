@@ -1,340 +1,85 @@
-const mongoose = require("mongoose");
-const { Review, User, Experience } = require("../db/mongoose");
+/**
+ * Review Handler
+ * HTTP controller layer for review submissions, queries, eligibility checks, and ratings.
+ * Delegates all domain logic, validations, and recalculations to ReviewService.
+ */
+
+const { reviewService } = require("../services/reviewService");
 
 /**
- * Helper to update Experience ratings when reviews change
+ * Create or update a review
+ * POST /api/reviews
  */
-async function updateExperienceRating(experienceId) {
-    if (!experienceId) return;
-    try {
-        const reviews = await Review.find({ $or: [{ experience: experienceId }, { post: experienceId }] });
-        const count = reviews.length;
-        const average = count > 0 
-            ? Math.round((reviews.reduce((sum, r) => sum + r.rating, 0) / count) * 10) / 10 
-            : 0;
-            
-        await Experience.findByIdAndUpdate(experienceId, {
-            'rating.average': average,
-            'rating.count': count
-        });
-    } catch (err) {
-        console.error("Error updating experience rating:", err);
-    }
-}
-const updatePostRating = updateExperienceRating;
-
-// CREATE REVIEW - Authenticated users can review hosts
 const createReview = async (req, res) => {
-    let validExperienceId = null;
     try {
-        if (req.user.role === 'host') {
-            return res.status(400).json({
-                success: false,
-                message: "Hosts cannot engage with another host's experience. Only guests can."
-            });
-        }
         const { hostId, experienceId, rating, comment } = req.body;
+        const result = await reviewService.createOrUpdateReview(
+            req.user.userId,
+            req.user.role,
+            { hostId, experienceId, rating, comment }
+        );
 
-        // Validation
-        if (!hostId || !rating || !mongoose.Types.ObjectId.isValid(hostId)) {
-            return res.status(400).json({
-                success: false,
-                message: "Valid host ID and rating are required"
-            });
-        }
-
-        // Check if host exists and is actually a host
-        const host = await User.findById(hostId);
-        if (!host) {
-            return res.status(404).json({
-                success: false,
-                message: "Host not found"
-            });
-        }
-
-        if (host.role !== 'host') {
-            return res.status(400).json({
-                success: false,
-                message: "Reviews can only be given to hosts"
-            });
-        }
-
-        // Users cannot review themselves
-        if (req.user.userId === hostId) {
-            return res.status(400).json({
-                success: false,
-                message: "You cannot review yourself"
-            });
-        }
-
-        // Validate rating
-        const ratingNum = Number(rating);
-        if (ratingNum < 1 || ratingNum > 5) {
-            return res.status(400).json({
-                success: false,
-                message: "Rating must be between 1 and 5"
-            });
-        }
-
-        // Normalize experienceId (handle empty string or invalid ObjectId safely)
-        const rawTargetId = experienceId;
-        if (rawTargetId && typeof rawTargetId === 'string' && rawTargetId.trim() !== '' && mongoose.Types.ObjectId.isValid(rawTargetId.trim())) {
-            validExperienceId = rawTargetId.trim();
-        }
-
-        // Check if experience exists if provided
-        if (validExperienceId) {
-            const experience = await Experience.findById(validExperienceId);
-            if (!experience) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Experience not found"
-                });
-            }
-
-            // Check if the experience belongs to the host
-            if (experience.user.toString() !== hostId) {
-                return res.status(400).json({
-                    success: false,
-                    message: "This experience does not belong to the specified host"
-                });
-            }
-
-            // Verify that the guest has booked and completed this specific experience before reviewing
-            const Booking = require("../models/Booking");
-            const hasCompleted = await Booking.findOne({
-                $or: [{ experience: validExperienceId }, { post: validExperienceId }],
-                guest: req.user.userId,
-                status: 'completed'
-            });
-
-            if (!hasCompleted) {
-                const hasAny = await Booking.findOne({
-                    $or: [{ experience: validExperienceId }, { post: validExperienceId }],
-                    guest: req.user.userId
-                });
-
-                if (!hasAny) {
-                    return res.status(403).json({
-                        success: false,
-                        message: "To review the experience, you need to first book and experience it thoroughly."
-                    });
-                } else {
-                    return res.status(403).json({
-                        success: false,
-                        message: "To review the experience, you need to experience it and complete it."
-                    });
-                }
-            }
-        }
-
-        // Check if user already reviewed this host for this specific experience (or generic host review)
-        let review = null;
-        if (validExperienceId) {
-            review = await Review.findOne({
-                host: hostId,
-                reviewer: req.user.userId,
-                $or: [{ experience: validExperienceId }, { post: validExperienceId }]
-            });
-        } else {
-            review = await Review.findOne({
-                host: hostId,
-                reviewer: req.user.userId,
-                experience: null,
-                post: null
-            });
-        }
-        const isUpdate = !!review;
-
-        if (review) {
-            // Update existing review
-            review.rating = ratingNum;
-            if (comment !== undefined) review.comment = comment;
-            await review.save();
-        } else {
-            // Create new review
-            review = await Review.create({
-                host: hostId,
-                reviewer: req.user.userId,
-                experience: validExperienceId,
-                post: validExperienceId,
-                reviewerRole: req.user.role,
-                rating: ratingNum,
-                comment: comment || ""
-            });
-        }
-
-        const populatedReview = await Review.findById(review._id)
-            .populate('reviewer', 'firstname lastname email role avatar')
-            .populate('host', 'firstname lastname email role avatar')
-            .populate('experience', 'title photos location price')
-            .populate('post', 'title photos location price');
-
-        return res.status(isUpdate ? 200 : 201).json({
+        return res.status(result.isUpdate ? 200 : 201).json({
             success: true,
-            message: isUpdate ? "Rating updated successfully" : "Rating submitted successfully",
-            review: populatedReview
+            message: result.isUpdate ? "Rating updated successfully" : "Rating submitted successfully",
+            review: result.review
         });
     } catch (error) {
         console.error("Submit review error:", error);
-        return res.status(500).json({ success: false, message: "Error processing your rating" });
-    } finally {
-        if (validExperienceId) {
-            updateExperienceRating(validExperienceId);
-        }
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error processing your rating"
+        });
     }
 };
 
-// GET ALL REVIEWS FOR A HOST - Public
+/**
+ * Get all reviews for a host
+ * GET /api/reviews/host/:hostId
+ */
 const getHostReviews = async (req, res) => {
     try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.hostId)) {
-            return res.status(400).json({ success: false, message: "Invalid host ID format" });
-        }
-        const {
-            rating,
-            page = 1,
-            limit = 20,
-            includeRatingOnly
-        } = req.query;
-
-        const hostObjectId = new mongoose.Types.ObjectId(req.params.hostId);
-        const hostExperiences = await Experience.find({ user: hostObjectId }).select('_id');
-        const hostExpIds = hostExperiences.map(p => p._id);
-
-        const baseMatch = hostExpIds.length > 0
-            ? { $or: [{ host: hostObjectId }, { experience: { $in: hostExpIds } }, { post: { $in: hostExpIds } }] }
-            : { host: hostObjectId };
-
-        const filter = { ...baseMatch };
-
-        if (rating) filter.rating = Number(rating);
-        if (includeRatingOnly === 'false') {
-            filter.comment = { $exists: true, $ne: "" };
-        }
-
-        const skip = (Number(page) - 1) * Number(limit);
-
-        let reviews = await Review.find(filter)
-            .populate('reviewer', 'firstname lastname email role avatar')
-            .populate('experience', 'title photos location price')
-            .populate('post', 'title photos location price')
-            .sort({ createdAt: -1 })
-            .limit(Number(limit))
-            .skip(skip);
-
-        if (includeRatingOnly === 'false') {
-            reviews = reviews.filter(r => r.comment && r.comment.trim() !== "");
-        }
-
-        // Filter out any orphaned reviews where reviewer user no longer exists
-        reviews = reviews.filter(r => r.reviewer && (r.reviewer._id || r.reviewer.id));
-
-        // Deduplicate in case a reviewer has multiple entries (e.g. host review + post review)
-        const seenReviewers = new Set();
-        const uniqueReviews = [];
-        for (const r of reviews) {
-            const revId = r.reviewer?._id ? r.reviewer._id.toString() : (r.reviewer?.id ? r.reviewer.id.toString() : null);
-            if (!revId) continue;
-            if (!seenReviewers.has(revId)) {
-                seenReviewers.add(revId);
-                uniqueReviews.push(r);
-            } else if (r.comment && r.comment.trim() !== "") {
-                const prevIdx = uniqueReviews.findIndex(x => (x.reviewer?._id ? x.reviewer._id.toString() : '') === revId);
-                if (prevIdx !== -1 && (!uniqueReviews[prevIdx].comment || uniqueReviews[prevIdx].comment.trim() === "")) {
-                    uniqueReviews[prevIdx] = r;
-                }
-            }
-        }
-        reviews = uniqueReviews;
-
-        // Calculate average rating and rating distribution across unique reviewer ratings
-        const allRatingsRaw = await Review.find(baseMatch).populate('reviewer', '_id');
-        const seenAllReviewers = new Set();
-        const allRatings = [];
-        for (const r of allRatingsRaw) {
-            if (!r.reviewer) continue;
-            const revId = r.reviewer._id ? r.reviewer._id.toString() : r.reviewer.toString();
-            if (!seenAllReviewers.has(revId)) {
-                seenAllReviewers.add(revId);
-                allRatings.push(r);
-            }
-        }
-
-        const total = allRatings.length;
-
-        const avgRating = allRatings.length > 0
-            ? allRatings.reduce((sum, r) => sum + r.rating, 0) / allRatings.length
-            : 0;
-
-        const writtenReviewsCount = allRatings.filter(r => r.comment && r.comment.trim() !== "").length;
-
-        const ratingDistribution = {
-            5: allRatings.filter(r => r.rating === 5).length,
-            4: allRatings.filter(r => r.rating === 4).length,
-            3: allRatings.filter(r => r.rating === 3).length,
-            2: allRatings.filter(r => r.rating === 2).length,
-            1: allRatings.filter(r => r.rating === 1).length
-        };
-
+        const result = await reviewService.getHostReviews(req.params.hostId, req.query);
         return res.status(200).json({
             success: true,
-            count: reviews.length,
-            total,
-            page: Number(page),
-            totalPages: Math.ceil(total / Number(limit)),
-            averageRating: Number(avgRating.toFixed(2)),
-            totalRatings: allRatings.length,
-            totalReviews: writtenReviewsCount,
-            ratingDistribution,
-            reviews
+            ...result
         });
     } catch (error) {
         console.error("Get host reviews error:", error);
-        return res.status(500).json({ success: false, message: "Error fetching reviews" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error fetching reviews"
+        });
     }
 };
 
-// GET REVIEWS BY REVIEWER - Get all reviews written by a user
+/**
+ * Get all reviews written by a specific reviewer
+ * GET /api/reviews/reviewer/:reviewerId
+ */
 const getReviewerReviews = async (req, res) => {
     try {
-        const { page = 1, limit = 20 } = req.query;
-
-        const skip = (Number(page) - 1) * Number(limit);
-
-        const reviews = await Review.find({ reviewer: req.params.reviewerId })
-            .populate('host', 'firstname lastname email role avatar')
-            .populate('experience', 'title photos location price')
-            .populate('post', 'title photos location price')
-            .sort({ createdAt: -1 })
-            .limit(Number(limit))
-            .skip(skip);
-
-        const total = await Review.countDocuments({ reviewer: req.params.reviewerId });
-
+        const result = await reviewService.getReviewerReviews(req.params.reviewerId, req.query);
         return res.status(200).json({
             success: true,
-            count: reviews.length,
-            total,
-            page: Number(page),
-            totalPages: Math.ceil(total / Number(limit)),
-            reviews
+            ...result
         });
     } catch (error) {
         console.error("Get reviewer reviews error:", error);
-        return res.status(500).json({ success: false, message: "Error fetching reviews" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error fetching reviews"
+        });
     }
 };
 
-// GET MY REVIEWS - Get reviews written by authenticated user
+/**
+ * Get reviews written by the authenticated user
+ * GET /api/reviews/my/reviews
+ */
 const getMyReviews = async (req, res) => {
     try {
-        const reviews = await Review.find({ reviewer: req.user.userId })
-            .populate('host', 'firstname lastname email role avatar')
-            .populate('experience', 'title photos location price')
-            .populate('post', 'title photos location price')
-            .sort({ createdAt: -1 });
-
+        const reviews = await reviewService.getMyReviews(req.user.userId);
         return res.status(200).json({
             success: true,
             count: reviews.length,
@@ -342,206 +87,116 @@ const getMyReviews = async (req, res) => {
         });
     } catch (error) {
         console.error("Get my reviews error:", error);
-        return res.status(500).json({ success: false, message: "Error fetching your reviews" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error fetching your reviews"
+        });
     }
 };
 
-// GET REVIEWS RECEIVED BY ME (for hosts) - Get reviews received by authenticated user
+/**
+ * Get reviews received by the authenticated host
+ * GET /api/reviews/received
+ */
 const getReceivedReviews = async (req, res) => {
     try {
-        if (req.user.role !== 'host') {
+        if (req.user.role !== "host") {
             return res.status(403).json({
                 success: false,
                 message: "Only hosts can view received reviews"
             });
         }
 
-        const {
-            rating,
-            page = 1,
-            limit = 20
-        } = req.query;
-
-        const filter = {
-            host: req.user.userId
-        };
-
-        if (rating) filter.rating = Number(rating);
-
-        const skip = (Number(page) - 1) * Number(limit);
-
-        const reviews = await Review.find(filter)
-            .populate('reviewer', 'firstname lastname email role avatar')
-            .populate('experience', 'title photos location price')
-            .populate('post', 'title photos location price')
-            .sort({ createdAt: -1 })
-            .limit(Number(limit))
-            .skip(skip);
-
-        const total = await Review.countDocuments(filter);
-
+        const result = await reviewService.getReceivedReviews(req.user.userId, req.query);
         return res.status(200).json({
             success: true,
-            count: reviews.length,
-            total,
-            page: Number(page),
-            totalPages: Math.ceil(total / Number(limit)),
-            reviews
+            ...result
         });
     } catch (error) {
         console.error("Get received reviews error:", error);
-        return res.status(500).json({ success: false, message: "Error fetching received reviews" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error fetching received reviews"
+        });
     }
 };
 
-// CHECK ELIGIBILITY - Check if authenticated user is allowed to review an experience
+/**
+ * Check if the authenticated user is eligible to review an experience
+ * GET /api/reviews/check-eligibility
+ */
 const checkReviewEligibility = async (req, res) => {
     try {
-        if (req.user.role === 'host') {
-            return res.status(200).json({
-                success: true,
-                eligible: false,
-                reason: "host_restricted",
-                message: "Hosts cannot engage with another host's experience. Only guests can."
-            });
-        }
-        const rawTargetId = req.query.experienceId;
-
-        if (!rawTargetId) {
-            return res.status(400).json({ success: false, message: "Experience ID is required" });
-        }
-
-        const Booking = require("../models/Booking");
-        const hasCompleted = await Booking.findOne({
-            experience: rawTargetId,
-            guest: req.user.userId,
-            status: 'completed'
-        });
-
-        if (hasCompleted) {
-            return res.status(200).json({ success: true, eligible: true });
-        }
-
-        const hasAny = await Booking.findOne({
-            experience: rawTargetId,
-            guest: req.user.userId
-        });
-
-        if (!hasAny) {
-            return res.status(200).json({
-                success: true,
-                eligible: false,
-                reason: "not_booked",
-                message: "To review the experience, you need to first book and experience it thoroughly."
-            });
-        }
-
+        const result = await reviewService.checkReviewEligibility(
+            req.user.userId,
+            req.user.role,
+            req.query.experienceId
+        );
         return res.status(200).json({
             success: true,
-            eligible: false,
-            reason: "not_completed",
-            message: "To review the experience, you need to experience it and complete it."
+            ...result
         });
-
     } catch (error) {
         console.error("Check eligibility error:", error);
-        return res.status(500).json({ success: false, message: "Error checking review eligibility" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error checking review eligibility"
+        });
     }
 };
 
-// GET LATEST PUBLIC REVIEWS (For Homepage Guest Reviews section - all written reviews sorted by latest)
+/**
+ * Get latest public reviews for homepage feed
+ * GET /api/reviews/latest
+ */
 const getLatestReviews = async (req, res) => {
     try {
-        const limitNum = Math.min(Number(req.query.limit || 20), 50);
-
-        const candidateReviews = await Review.find({ 
-            comment: { $exists: true, $ne: "" },
-            rating: { $gte: 1 }
-        })
-            .populate('reviewer', 'firstname lastname name email role avatar')
-            .populate('host', 'firstname lastname name email role avatar')
-            .populate('experience', 'title photos location price')
-            .populate('post', 'title photos location price')
-            .sort({ createdAt: -1 })
-            .limit(limitNum * 3);
-
-        // Safely filter out any orphaned/deleted user records or empty/whitespace-only comments
-        const validReviews = candidateReviews.filter(
-            r => r && r.comment && r.comment.trim() !== "" && r.reviewer && (r.reviewer.firstname || r.reviewer.name)
-        ).slice(0, limitNum);
-
+        const reviews = await reviewService.getLatestReviews(req.query.limit);
         return res.status(200).json({
             success: true,
-            count: validReviews.length,
-            reviews: validReviews
+            count: reviews.length,
+            reviews
         });
     } catch (error) {
         console.error("Get latest reviews error:", error);
-        return res.status(500).json({ success: false, message: "Error fetching latest reviews" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error fetching latest reviews"
+        });
     }
 };
 
-// GET SINGLE REVIEW BY ID
+/**
+ * Get single review by ID
+ * GET /api/reviews/:id
+ */
 const getReviewById = async (req, res) => {
     try {
-        const review = await Review.findById(req.params.id)
-            .populate('reviewer', 'firstname lastname email role avatar')
-            .populate('host', 'firstname lastname email role avatar')
-            .populate('experience', 'title photos location price')
-            .populate('post', 'title photos location price');
-
-        if (!review) {
-            return res.status(404).json({ success: false, message: "Review not found" });
-        }
-
-        return res.status(200).json({ success: true, review });
+        const review = await reviewService.getReviewById(req.params.id);
+        return res.status(200).json({
+            success: true,
+            review
+        });
     } catch (error) {
         console.error("Get review error:", error);
-        return res.status(500).json({ success: false, message: "Error fetching review" });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error fetching review"
+        });
     }
 };
 
-// UPDATE REVIEW - Only review owner
+/**
+ * Update review by owner
+ * PUT /api/reviews/:id
+ */
 const updateReview = async (req, res) => {
-    let review;
     try {
-        review = await Review.findById(req.params.id);
-
-        if (!review) {
-            return res.status(404).json({ success: false, message: "Review not found" });
-        }
-
-        // Check if user is the review owner
-        if (review.reviewer.toString() !== req.user.userId) {
-            return res.status(403).json({
-                success: false,
-                message: "You can only edit your own reviews"
-            });
-        }
-
-        const { rating, comment } = req.body;
-
-        // Update fields
-        if (rating !== undefined) {
-            const ratingNum = Number(rating);
-            if (ratingNum < 1 || ratingNum > 5) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Rating must be between 1 and 5"
-                });
-            }
-            review.rating = ratingNum;
-        }
-        if (comment !== undefined) review.comment = comment;
-
-        await review.save();
-
-        const updatedReview = await Review.findById(review._id)
-            .populate('reviewer', 'firstname lastname email role avatar')
-            .populate('host', 'firstname lastname email role avatar')
-            .populate('experience', 'title photos location price')
-            .populate('post', 'title photos location price');
-
+        const updatedReview = await reviewService.updateReview(
+            req.params.id,
+            req.user.userId,
+            req.body
+        );
         return res.status(200).json({
             success: true,
             message: "Review updated successfully",
@@ -549,47 +204,30 @@ const updateReview = async (req, res) => {
         });
     } catch (error) {
         console.error("Update review error:", error);
-        return res.status(500).json({ success: false, message: "Error updating review" });
-    } finally {
-        const targetExp = review?.experience || review?.post;
-        if (targetExp) {
-            updateExperienceRating(targetExp);
-        }
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error updating review"
+        });
     }
 };
 
-// DELETE REVIEW - Only review owner
+/**
+ * Delete review by owner
+ * DELETE /api/reviews/:id
+ */
 const deleteReview = async (req, res) => {
-    let review;
     try {
-        review = await Review.findById(req.params.id);
-
-        if (!review) {
-            return res.status(404).json({ success: false, message: "Review not found" });
-        }
-
-        // Check if user is the review owner
-        if (review.reviewer.toString() !== req.user.userId) {
-            return res.status(403).json({
-                success: false,
-                message: "You can only delete your own reviews"
-            });
-        }
-
-        await Review.findByIdAndDelete(req.params.id);
-
+        await reviewService.deleteReview(req.params.id, req.user.userId);
         return res.status(200).json({
             success: true,
             message: "Review deleted successfully"
         });
     } catch (error) {
         console.error("Delete review error:", error);
-        return res.status(500).json({ success: false, message: "Error deleting review" });
-    } finally {
-        const targetExp = review?.experience || review?.post;
-        if (targetExp) {
-            updateExperienceRating(targetExp);
-        }
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || "Error deleting review"
+        });
     }
 };
 
@@ -604,6 +242,6 @@ module.exports = {
     getReviewById,
     updateReview,
     deleteReview,
-    updateExperienceRating,
-    updatePostRating
+    updateExperienceRating: (id) => reviewService.recalculateExperienceRating(id),
+    updatePostRating: (id) => reviewService.recalculateExperienceRating(id)
 };

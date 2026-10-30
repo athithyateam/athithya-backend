@@ -95,15 +95,6 @@ export default class AuthService {
             renderBrandedEmail
         };
         this.welcomeNotifier = deps.welcomeNotifier;
-
-        const methods = [
-            "generateAuthToken", "verifyToken", "validateRole", "getOrCreateOfficialAdmin",
-            "sendWelcomeChatMessage", "sendWelcomeEmail", "onboardNewUser", "triggerNewUserWelcome",
-            "formatAuthUser", "notifyAdminNewUserSignup", "initiateSignup", "completeSignup",
-            "signin", "googleSignin", "forgotPassword", "resetPassword", "getCurrentUser",
-            "generateAndSendOTP", "verifyAndConsumeOTP", "registerAndOnboardUser"
-        ];
-        methods.forEach(fn => ((this as any)[fn] = (this as any)[fn].bind(this)));
     }
 
     public static getInstance(deps?: AuthDependencies): AuthService {

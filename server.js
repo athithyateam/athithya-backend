@@ -121,6 +121,7 @@ app.use((req, res, next) => {
 });
 
 // Routes
+const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/users");
 const experienceRoutes = require("./routes/experiences");
 const reviewRoutes = require("./routes/reviews");
@@ -131,7 +132,7 @@ const wishlistScheduleRoutes = require("./routes/wishlistSchedules");
 const chatRoutes = require("./routes/chat");
 const { startWishlistReminderWorker } = require("./utils/wishlistReminderWorker");
 
-app.use("/api/auth", userRoutes);
+app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/experiences", experienceRoutes);
 app.use("/api/reviews", reviewRoutes);
