@@ -225,7 +225,12 @@ export function isValidS3MediaUrl(item: any, bucketName: string = process.env.AW
     const urlStr = typeof item === "string" ? item : item?.url;
     if (!urlStr || typeof urlStr !== "string") return false;
     if (urlStr.startsWith("/")) return true;
-    return urlStr.includes("amazonaws.com") && urlStr.includes(bucketName);
+    const isS3 = urlStr.includes("amazonaws.com") || urlStr.includes(".s3.");
+    if (!isS3) return false;
+    if (bucketName && bucketName !== "your_bucket_name" && !bucketName.includes("athithya")) {
+        return urlStr.includes(bucketName);
+    }
+    return true;
 }
 
 /** Standard tier-based platform fee calculation */

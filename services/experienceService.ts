@@ -81,6 +81,21 @@ export class ExperienceService {
             throw new Error("Use ExperienceService.getInstance() to obtain the singleton instance.");
         }
         this.actionService = actionService;
+
+        this.createExperience = this.createExperience.bind(this);
+        this.updateExperience = this.updateExperience.bind(this);
+        this.updateExperienceStatus = this.updateExperienceStatus.bind(this);
+        this.toggleHideExperience = this.toggleHideExperience.bind(this);
+        this.deleteExperience = this.deleteExperience.bind(this);
+        this.saveExperience = this.saveExperience.bind(this);
+        this.unsaveExperience = this.unsaveExperience.bind(this);
+        this.getExperiences = this.getExperiences.bind(this);
+        this.getExperienceDetail = this.getExperienceDetail.bind(this);
+        this.getTopRatedTreks = this.getTopRatedTreks.bind(this);
+        this.getNearbyTreks = this.getNearbyTreks.bind(this);
+        this.getUserExperiences = this.getUserExperiences.bind(this);
+        this.getPendingExperiences = this.getPendingExperiences.bind(this);
+        this.getCategoryActivity = this.getCategoryActivity.bind(this);
     }
 
     public static getInstance(actionService?: ExperienceActionService): ExperienceService {
@@ -153,40 +168,26 @@ export const experienceService = ExperienceService.getInstance();
 export default ExperienceService;
 
 // Convenience bound exports
-export const createExperience = (userId: string, userRole: string, experiencePayload: any, files?: any, reqOrApp?: any) => experienceService.createExperience(userId, userRole, experiencePayload, files, reqOrApp);
-export const updateExperience = (experienceId: string, userId: string, userRole: string, updatePayload: any, files?: any, reqOrApp?: any) => experienceService.updateExperience(experienceId, userId, userRole, updatePayload, files, reqOrApp);
-export const updateExperienceStatus = (experienceId: string, status: string, remarks?: string, adminUserId?: string, reqOrApp?: any) => experienceService.updateExperienceStatus(experienceId, status, remarks, adminUserId, reqOrApp);
-export const toggleHideExperience = (experienceId: string, userId: string, userRole: string, action: string, reason?: string, reqOrApp?: any) => experienceService.toggleHideExperience(experienceId, userId, userRole, action, reason, reqOrApp);
-export const deleteExperience = (experienceId: string, userId: string, userRole: string, reqOrApp?: any) => experienceService.deleteExperience(experienceId, userId, userRole, reqOrApp);
-export const saveExperience = (experienceId: string, userId: string, userRole: string) => experienceService.saveExperience(experienceId, userId, userRole);
-export const unsaveExperience = (experienceId: string, userId: string) => experienceService.unsaveExperience(experienceId, userId);
-export const getExperiences = (options?: GetExperiencesOptions) => experienceService.getExperiences(options);
-export const getExperienceDetail = (experienceId: string) => experienceService.getExperienceDetail(experienceId);
-export const getTopRatedTreks = (options?: GetTopRatedTreksOptions) => experienceService.getTopRatedTreks(options);
-export const getNearbyTreks = (options?: GetNearbyTreksOptions) => experienceService.getNearbyTreks(options);
-export const getUserExperiences = (userId: string, isSelfOrAdmin?: boolean) => experienceService.getUserExperiences(userId, isSelfOrAdmin);
-export const getPendingExperiences = (options?: GetPendingExperiencesOptions) => experienceService.getPendingExperiences(options);
-export const getCategoryActivity = () => experienceService.getCategoryActivity();
+export const createExperience = experienceService.createExperience;
+export const updateExperience = experienceService.updateExperience;
+export const updateExperienceStatus = experienceService.updateExperienceStatus;
+export const toggleHideExperience = experienceService.toggleHideExperience;
+export const deleteExperience = experienceService.deleteExperience;
+export const saveExperience = experienceService.saveExperience;
+export const unsaveExperience = experienceService.unsaveExperience;
+export const getExperiences = experienceService.getExperiences;
+export const getExperienceDetail = experienceService.getExperienceDetail;
+export const getTopRatedTreks = experienceService.getTopRatedTreks;
+export const getNearbyTreks = experienceService.getNearbyTreks;
+export const getUserExperiences = experienceService.getUserExperiences;
+export const getPendingExperiences = experienceService.getPendingExperiences;
+export const getCategoryActivity = experienceService.getCategoryActivity;
 
 // CommonJS compatibility
 module.exports = experienceService;
 module.exports.ExperienceService = ExperienceService;
 module.exports.experienceService = experienceService;
 module.exports.default = ExperienceService;
-module.exports.createExperience = createExperience;
-module.exports.updateExperience = updateExperience;
-module.exports.updateExperienceStatus = updateExperienceStatus;
-module.exports.toggleHideExperience = toggleHideExperience;
-module.exports.deleteExperience = deleteExperience;
-module.exports.saveExperience = saveExperience;
-module.exports.unsaveExperience = unsaveExperience;
-module.exports.getExperiences = getExperiences;
-module.exports.getExperienceDetail = getExperienceDetail;
-module.exports.getTopRatedTreks = getTopRatedTreks;
-module.exports.getNearbyTreks = getNearbyTreks;
-module.exports.getUserExperiences = getUserExperiences;
-module.exports.getPendingExperiences = getPendingExperiences;
-module.exports.getCategoryActivity = getCategoryActivity;
 module.exports.calculatePricingAndFees = calculatePricingAndFees;
 module.exports.isValidS3MediaUrl = isValidS3MediaUrl;
 module.exports.parseExperiencePayload = parseExperiencePayload;

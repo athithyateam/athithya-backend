@@ -179,15 +179,12 @@ export const userService = UserService.getInstance();
 export default UserService;
 
 // Convenience function exports
-export const addSavedExperience = (userId: string, experienceId: string) => userService.addSavedExperience(userId, experienceId);
-export const removeSavedExperience = (userId: string, experienceId: string) => userService.removeSavedExperience(userId, experienceId);
-export const getSavedExperiences = (userId: string) => userService.getSavedExperiences(userId);
+export const addSavedExperience = userService.addSavedExperience.bind(userService);
+export const removeSavedExperience = userService.removeSavedExperience.bind(userService);
+export const getSavedExperiences = userService.getSavedExperiences.bind(userService);
 
 // CommonJS compatibility
 module.exports = userService;
 module.exports.UserService = UserService;
 module.exports.userService = userService;
-module.exports.addSavedExperience = addSavedExperience;
-module.exports.removeSavedExperience = removeSavedExperience;
-module.exports.getSavedExperiences = getSavedExperiences;
 module.exports.default = UserService;

@@ -10,7 +10,7 @@ const { notificationService } = require("../services/notificationService");
  */
 function startWishlistReminderWorker(app) {
     // Run worker every 30 seconds
-    setInterval(async () => {
+    const intervalId = setInterval(async () => {
         try {
             const now = new Date();
             const dueSchedules = await WishlistSchedule.find({
@@ -95,6 +95,7 @@ function startWishlistReminderWorker(app) {
             console.error("Error in wishlistReminderWorker:", err);
         }
     }, 30000); // 30 seconds interval
+    return intervalId;
 }
 
 module.exports = {

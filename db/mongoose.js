@@ -17,10 +17,11 @@ const Friendship = require("../models/Friendship");
 const FriendRequest = require("../models/FriendRequest");
 const SavedExperience = require("../models/SavedExperience");
 
-const MONGO_URL = process.env.MONGO_URL;
-
-if (!MONGO_URL) {
-    console.error("❌ ERROR: MONGO_URL is not defined in environment variables!");
+if (!process.env.MONGO_URL) {
+    try {
+        const path = require("path");
+        require("dotenv").config({ path: path.resolve(process.cwd(), ".env") });
+    } catch (_) {}
 }
 
 /**
@@ -39,6 +40,12 @@ async function connectDB() {
         return cached.conn;
     }
 
+    const mongoUrl = process.env.MONGO_URL;
+    if (!mongoUrl) {
+        console.error("❌ Cannot connect: MONGO_URL is missing in environment variables!");
+        throw new Error("MONGO_URL environment variable is required to connect to database");
+    }
+
     if (!cached.promise) {
         const opts = {
             bufferCommands: true,
@@ -46,26 +53,22 @@ async function connectDB() {
             socketTimeoutMS: 45000,
         };
 
-        if (!MONGO_URL) {
-            console.error("❌ Cannot connect: MONGO_URL is missing");
-        }
-
-        cached.promise = mongoose.connect(MONGO_URL, opts).then(async (mongooseInstance) => {
+        cached.promise = mongoose.connect(mongoUrl, opts).then(async (mongooseInstance) => {
             console.log("✅ Connected to MongoDB");
             try {
-                await mongooseInstance.model("post").updateMany({ clicks: { $exists: false } }, { $set: { clicks: 0 } });
+                await Experience.updateMany({ clicks: { $exists: false } }, { $set: { clicks: 0 } });
             } catch (err) {
                 console.error("Clicks migration error:", err);
             }
             try {
-                const legacyPosts = await mongooseInstance.model("post").find({
+                const legacyExperiences = await Experience.find({
                     categories: { $in: ["Rock Climbing", "Flyboarding", "rock-climbing", "flyboarding", "Rock climbing", "Fly boarding"] }
                 });
-                if (legacyPosts.length > 0) {
-                    for (const post of legacyPosts) {
+                if (legacyExperiences.length > 0) {
+                    for (const exp of legacyExperiences) {
                         let changed = false;
                         const newCategories = [];
-                        for (const cat of (post.categories || [])) {
+                        for (const cat of (exp.categories || [])) {
                             const lc = String(cat).trim().toLowerCase();
                             if (lc === "rock climbing" || lc === "flyboarding" || lc === "rock-climbing" || lc === "fly boarding") {
                                 if (!newCategories.includes("Others")) {
@@ -77,13 +80,13 @@ async function connectDB() {
                             }
                         }
                         if (changed) {
-                            await mongooseInstance.model("post").updateOne(
-                                { _id: post._id },
+                            await Experience.updateOne(
+                                { _id: exp._id },
                                 { $set: { categories: newCategories } }
                             );
                         }
                     }
-                    console.log(`[MIGRATION] Successfully migrated ${legacyPosts.length} experiences to "Others" category`);
+                    console.log(`[MIGRATION] Successfully migrated ${legacyExperiences.length} experiences to "Others" category`);
                 }
             } catch (err) {
                 console.error("Category migration error:", err.message);
