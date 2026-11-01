@@ -4,6 +4,10 @@
  * live typing indicators, presence broadcasts, and notificationService binding.
  */
 
+try {
+    require("tsx/cjs");
+} catch (_) {}
+
 const { Server } = require("socket.io");
 const { notificationService } = require("../services/notificationService");
 

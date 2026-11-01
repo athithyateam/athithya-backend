@@ -4,6 +4,11 @@
  * connection pooling, and Vercel serverless compatibility.
  */
 
+// Register TypeScript loader hook for seamless execution with native `node server.js`
+try {
+    require("tsx/cjs");
+} catch (_) {}
+
 const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
