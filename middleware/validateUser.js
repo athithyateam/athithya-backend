@@ -1,6 +1,12 @@
 const { z } = require('zod');
 
-// Schema for signup
+// Schema for signup initiation (only email and role are required at initial OTP step)
+const initiateSignupSchema = z.object({
+    email: z.string().email("Invalid email format"),
+    role: z.enum(['guest', 'host']).optional()
+});
+
+// Schema for signup (legacy / direct)
 const signupSchema = z.object({
     firstname: z.string().min(1, "First name is required"),
     lastname: z.string().min(1, "Last name is required"),
@@ -58,4 +64,4 @@ const validateUser = (schema) => {
     };
 };
 
-module.exports = { validateUser, signupSchema, signinSchema, updateinfoSchema, otpCompleteSchema, googleSigninSchema };
+module.exports = { validateUser, initiateSignupSchema, signupSchema, signinSchema, updateinfoSchema, otpCompleteSchema, googleSigninSchema };
