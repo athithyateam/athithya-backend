@@ -42,8 +42,19 @@ export class StorageService {
      * Delete file by key via active storage provider
      * Positional parameter: (key)
      */
+    /**
+     * Delete file by key via active storage provider
+     * Positional parameter: (key)
+     */
     public async delete(key: string): Promise<void> {
         return await this.provider.delete(key);
+    }
+
+    /**
+     * Delete file alias for backwards compatibility
+     */
+    public async deleteFile(key: string): Promise<void> {
+        return await this.delete(key);
     }
 
     /**
@@ -66,18 +77,23 @@ export class StorageService {
 export const storageService = StorageService.getInstance();
 export default StorageService;
 
-// Convenience function exports for backward compatibility
-export const upload = (file: any, folder: string = "") => storageService.upload(file, folder);
-export const deleteFile = (key: string) => storageService.delete(key);
+// Convenience function exports for backward compatibility calling prototype directly
+export const upload = (file: any, folder: string = "") =>
+    StorageService.prototype.upload.call(storageService, file, folder);
+
+export const deleteFile = (key: string) =>
+    StorageService.prototype.delete.call(storageService, key);
+
 export const generatePresignedUploadUrl = (
     filenameOrOptions: string | { filename: string; fileType: string; fileSize?: number | string; type?: string },
     fileType?: string,
     fileSize?: number | string,
     type?: string
-) => storageService.generatePresignedUploadUrl(filenameOrOptions, fileType, fileSize, type);
+) =>
+    StorageService.prototype.generatePresignedUploadUrl.call(storageService, filenameOrOptions, fileType, fileSize, type);
 
-export const uploadToS3 = (file: any, folder: string = "") => storageService.upload(file, folder);
-export const deleteFromS3 = (key: string) => storageService.delete(key);
+export const uploadToS3 = upload;
+export const deleteFromS3 = deleteFile;
 export const getPresignedUploadUrl = generatePresignedUploadUrl;
 
 // CommonJS compatibility

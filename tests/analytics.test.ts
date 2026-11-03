@@ -99,3 +99,4 @@ describe("Analytics Handler & Google Analytics Safety Suite", () => {
         });
     });
 });
+

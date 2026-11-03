@@ -151,13 +151,22 @@ export class S3StorageProvider implements StorageProvider {
         const ext = path.extname(name) || "";
         const base = path.basename(name, ext).replace(/[^a-zA-Z0-9]/g, "");
 
-        let folder = "posts";
-        if (targetType === "avatars") {
+        let folder = "experiences";
+        const normType = (targetType || "").toLowerCase();
+        if (normType === "avatars" || normType === "avatar") {
             folder = "avatars";
-        } else if (targetType === "verification") {
+        } else if (normType === "verification" || normType === "aadhaar") {
             folder = "verification";
-        } else if (targetType === "personal") {
+        } else if (normType === "personal") {
             folder = "personal";
+        } else if (normType === "chat") {
+            folder = "chat";
+        } else if (normType === "banner") {
+            folder = "banner";
+        } else if (normType === "posts" || normType === "post") {
+            folder = "posts";
+        } else if (normType === "experiences" || normType === "experience") {
+            folder = "experiences";
         }
 
         const key = `${folder}/${base}-${uuidv4()}${ext}`;
