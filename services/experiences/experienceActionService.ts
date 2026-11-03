@@ -112,6 +112,18 @@ export class ExperienceActionService {
         }
     }
 
+    private async dispatchHtmlEmail(email: string, subject: string, html: string): Promise<any> {
+        if (!email) return;
+        try {
+            if (this.emailService && typeof this.emailService.sendHtmlEmail === "function") {
+                return await this.emailService.sendHtmlEmail(email, subject, html);
+            }
+            return await sendHtmlEmail(email, subject, html);
+        } catch (err) {
+            console.error("[ExperienceActionService] Failed to dispatch HTML email:", err);
+        }
+    }
+
     private async recordHideAudit(experience: any, actionType: "experience_hide" | "experience_unhide", hostName: string, reason?: string): Promise<void> {
         try {
             const snapshot: any = { experienceId: experience._id, title: experience.title };
@@ -344,7 +356,7 @@ export class ExperienceActionService {
                             </div>
                         </div>
                     `;
-                    sendHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send deletion approved email:", err));
+                    this.dispatchHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send deletion approved email:", err));
                 }
 
                 return { success: true, message: "Experience deletion request approved and deleted successfully" };
@@ -379,7 +391,7 @@ export class ExperienceActionService {
                             </div>
                         </div>
                     `;
-                    sendHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send deletion rejected email:", err));
+                    this.dispatchHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send deletion rejected email:", err));
                 }
 
                 return { success: true, message: "Experience deletion request rejected. Experience remains active.", experience };
@@ -423,7 +435,7 @@ export class ExperienceActionService {
                             </div>
                         </div>
                     `;
-                    sendHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send hide approved email:", err));
+                    this.dispatchHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send hide approved email:", err));
                 }
 
                 return { success: true, message: "Experience hide request approved successfully", experience };
@@ -456,7 +468,7 @@ export class ExperienceActionService {
                             </div>
                         </div>
                     `;
-                    sendHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send hide rejected email:", err));
+                    this.dispatchHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send hide rejected email:", err));
                 }
 
                 return { success: true, message: "Experience hide request rejected", experience };
@@ -502,7 +514,7 @@ export class ExperienceActionService {
                             </div>
                         </div>
                     `;
-                    sendHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send unhide approved email:", err));
+                    this.dispatchHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send unhide approved email:", err));
                 }
 
                 return { success: true, message: "Experience unhide request approved successfully", experience };
@@ -536,7 +548,7 @@ export class ExperienceActionService {
                             </div>
                         </div>
                     `;
-                    sendHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send unhide rejected email:", err));
+                    this.dispatchHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send unhide rejected email:", err));
                 }
 
                 return { success: true, message: "Experience unhide request rejected", experience };
@@ -622,7 +634,7 @@ export class ExperienceActionService {
                             </div>
                         </div>
                     `;
-                    sendHtmlEmail(hostEmail, emailSubject, htmlContent).catch(err => console.error("Failed to send status update email:", err));
+                    this.dispatchHtmlEmail(hostEmail, emailSubject, htmlContent).catch(err => console.error("Failed to send status update email:", err));
                 }
             } catch (notifErr) {
                 console.error("Error creating experience status notification:", notifErr);

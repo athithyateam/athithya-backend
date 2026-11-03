@@ -46,6 +46,14 @@ export class EmailService {
         this.apiInstance = apiInstance;
         this.templateCache = new Map();
         this.templatesDir = templatesDir;
+
+        this.generateOTP = this.generateOTP.bind(this);
+        this.renderTemplate = this.renderTemplate.bind(this);
+        this.sendEmail = this.sendEmail.bind(this);
+        this.sendTemplateEmail = this.sendTemplateEmail.bind(this);
+        this.sendOTPEmail = this.sendOTPEmail.bind(this);
+        this.sendHtmlEmail = this.sendHtmlEmail.bind(this);
+        this.renderBrandedEmail = this.renderBrandedEmail.bind(this);
     }
 
     public static getInstance(apiInstance?: any, templatesDir?: string): EmailService {
@@ -117,6 +125,11 @@ export class EmailService {
 
             if (!toEmail || !finalSubject || !finalHtml) {
                 throw new Error("Missing required email fields (to, subject, or htmlContent)");
+            }
+
+            if (!this.apiInstance || typeof this.apiInstance.sendTransacEmail !== "function") {
+                console.warn("[EmailService] Brevo apiInstance unavailable or not configured. Skipping email dispatch.");
+                return { success: false, error: "Brevo apiInstance unavailable" };
             }
 
             const sendSmtpEmail = new brevo.SendSmtpEmail();
@@ -234,17 +247,44 @@ export class EmailService {
 export const emailService = EmailService.getInstance();
 export default EmailService;
 
-// Convenience function exports for backward compatibility
-export const generateOTP = emailService.generateOTP.bind(emailService);
-export const renderTemplate = emailService.renderTemplate.bind(emailService);
-export const renderBrandedEmail = emailService.renderBrandedEmail.bind(emailService);
-export const sendEmail = emailService.sendEmail.bind(emailService);
-export const sendTemplateEmail = emailService.sendTemplateEmail.bind(emailService);
-export const sendOTPEmail = emailService.sendOTPEmail.bind(emailService);
-export const sendHtmlEmail = emailService.sendHtmlEmail.bind(emailService);
+// Convenience function exports for backward compatibility calling prototype directly
+export const generateOTP = (length?: number) =>
+    EmailService.prototype.generateOTP.call(emailService, length);
+export const renderTemplate = (templateName: string, data?: Record<string, any>) =>
+    EmailService.prototype.renderTemplate.call(emailService, templateName, data);
+export const renderBrandedEmail = (title: string, bodyHtml: string, subtitle?: string) =>
+    EmailService.prototype.renderBrandedEmail.call(emailService, title, bodyHtml, subtitle);
+export const sendEmail = (
+    toOrOptions: string | SendEmailOptions,
+    subject?: string,
+    htmlContent?: string,
+    senderName?: string,
+    senderEmail?: string
+) =>
+    EmailService.prototype.sendEmail.call(emailService, toOrOptions, subject, htmlContent, senderName, senderEmail);
+export const sendTemplateEmail = (
+    toOrOptions: string | SendTemplateEmailOptions,
+    subject?: string,
+    templateName?: string,
+    data?: Record<string, any>,
+    senderName?: string,
+    senderEmail?: string
+) =>
+    EmailService.prototype.sendTemplateEmail.call(emailService, toOrOptions, subject, templateName, data, senderName, senderEmail);
+export const sendOTPEmail = (email: string, otp: string, subject?: string, title?: string) =>
+    EmailService.prototype.sendOTPEmail.call(emailService, email, otp, subject, title);
+export const sendHtmlEmail = (email: string, subject: string, htmlContent: string) =>
+    EmailService.prototype.sendHtmlEmail.call(emailService, email, subject, htmlContent);
 
 // CommonJS compatibility
 module.exports = emailService;
 module.exports.EmailService = EmailService;
 module.exports.emailService = emailService;
 module.exports.default = EmailService;
+module.exports.generateOTP = generateOTP;
+module.exports.renderTemplate = renderTemplate;
+module.exports.renderBrandedEmail = renderBrandedEmail;
+module.exports.sendEmail = sendEmail;
+module.exports.sendTemplateEmail = sendTemplateEmail;
+module.exports.sendOTPEmail = sendOTPEmail;
+module.exports.sendHtmlEmail = sendHtmlEmail;

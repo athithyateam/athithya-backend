@@ -490,6 +490,16 @@ describe("Experience Visibility, Hide/Unhide & Idempotency Test Suite", () => {
             assert.strictEqual(mockAuditLogs.length, 1);
             assert.strictEqual(mockAuditLogs[0].type, "experience_hide");
         });
+
+        it("approves standard experience and dispatches status update email safely without scope error", async () => {
+            fakeExpDoc.status = "pending";
+            fakeExpDoc.hideRequested = false;
+            fakeExpDoc.unhideRequested = false;
+            fakeExpDoc.deleteRequested = false;
+
+            const res = await actionService.updateExperienceStatus(validExpId, "approved", "Experience approved", validAdminId);
+            assert.strictEqual(res.status, "active");
+        });
     });
 
     describe("BookingCreationService Guard Against Hidden Experiences", () => {
