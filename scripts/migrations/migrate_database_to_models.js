@@ -1,8 +1,8 @@
 /**
  * Comprehensive Database Migration Script: Schema & Model Alignment
  *
- * Aligns MongoDB collections and document structures with active Mongoose models:
- * 1. Renames collections:
+ * Aligns MongoDB collections and document structures strictly with active Mongoose models:
+ * 1. Renames/merges collections:
  *    - 'schedules' -> 'groupbookings'
  *    - 'guestschedules' -> 'wishlistschedules'
  *    - 'hosthistories' -> 'hostauditlogs'
@@ -17,31 +17,34 @@
  *    - 'bookings': drops legacy indexes, renames post -> experience, postTitle -> experienceTitle, scheduleId -> groupBookingId, unsets postType
  *    - 'reviews': drops legacy indexes on 'post', renames post -> experience
  *    - 'groupbookings': drops legacy indexes, renames post -> experience, postTitle -> experienceTitle, unsets postType
+ *    - 'wishlistschedules': drops legacy indexes, renames post -> experience
+ *    - 'savedposts': drops legacy indexes, renames post -> experience
  *    - 'notifications': metadata.postId -> metadata.experienceId, metadata.scheduleId -> metadata.groupBookingId, link: /post/ -> /experience/
  *    - 'messages': locationData.postId -> locationData.experienceId
  *    - 'conversations': unsets deprecated itinerary array
- *    - 'posts': unsets reactions, postType, stay capacity remnants
+ *    - 'posts': unsets reactions, postType, stay/capacity remnants; ensures default metrics
  * 4. Normalizes 'hostauditlogs':
  *    - Wraps legacy flat experience/host fields into structured 'snapshot' object
  * 5. Drops deprecated collections:
- *    - 'communityposts'
- * 6. Builds and verifies model indexes across all collections.
+ *    - 'communityposts', 'schedules', 'guestschedules', 'hosthistories'
+ * 6. Builds and verifies active Mongoose model indexes across all collections.
  *
  * Usage:
  *   node scripts/migrations/migrate_database_to_models.js [--dry-run]
  */
 
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.resolve(__dirname, "../../.env") });
 const mongoose = require("mongoose");
 
 const isDryRun = process.argv.includes("--dry-run");
-const MONGO_URL = process.env.MONGO_URL || "mongodb://localhost:27017/athithya";
+const MONGO_URL = process.env.MONGO_URL || "mongodb://localhost:27017/athithya_4nov";
 
 async function runMigration() {
-    console.log("=".repeat(70));
+    console.log("=".repeat(75));
     console.log(`🚀 Starting Database Migration [${isDryRun ? "DRY-RUN MODE (No writes)" : "LIVE EXECUTION"}]`);
     console.log(`📡 Connecting to: ${MONGO_URL}`);
-    console.log("=".repeat(70));
+    console.log("=".repeat(75));
 
     await mongoose.connect(MONGO_URL, {
         bufferCommands: true,
@@ -51,105 +54,139 @@ async function runMigration() {
 
     const db = mongoose.connection.db;
 
-    // Helper to safely list collection names in lowercase
+    // Helper to safely list lowercase collection names
     async function getCollectionNames() {
         const cols = await db.listCollections().toArray();
         return cols.map(c => c.name.toLowerCase());
     }
 
+    // Helper to safely drop indexes matching patterns
+    async function dropMatchingIndexes(colName, predicate) {
+        try {
+            const indexes = await db.collection(colName).listIndexes().toArray();
+            for (const idx of indexes) {
+                if (idx.name === "_id_") continue;
+                if (predicate(idx)) {
+                    console.log(`   Dropping index '${idx.name}' on '${colName}'...`);
+                    await db.collection(colName).dropIndex(idx.name);
+                }
+            }
+        } catch (e) {
+            // Collection might not exist or index listing failed
+        }
+    }
+
     // ---------------------------------------------------------
-    // STEP 1: Collection Renames
+    // STEP 1: Collection Merges and Renames
     // ---------------------------------------------------------
-    console.log("--- STEP 1: Collection Renames ---");
+    console.log("--- STEP 1: Collection Merges and Renames ---");
     let colNames = await getCollectionNames();
 
     // 1A. 'schedules' -> 'groupbookings'
     if (colNames.includes("schedules")) {
-        if (!colNames.includes("groupbookings")) {
-            console.log("📦 Renaming collection 'schedules' -> 'groupbookings'...");
-            if (!isDryRun) {
+        const schedulesCount = await db.collection("schedules").countDocuments();
+        const gbCount = colNames.includes("groupbookings") ? await db.collection("groupbookings").countDocuments() : 0;
+        console.log(`📦 'schedules': ${schedulesCount} docs, 'groupbookings': ${gbCount} docs`);
+
+        if (!isDryRun) {
+            if (colNames.includes("groupbookings") && gbCount === 0) {
+                await db.collection("groupbookings").drop();
                 await db.collection("schedules").rename("groupbookings");
-                console.log("✅ Successfully renamed 'schedules' -> 'groupbookings'");
-            }
-        } else {
-            console.log("ℹ️ Both 'schedules' and 'groupbookings' exist. Copying missing documents...");
-            const legacyDocs = await db.collection("schedules").find({}).toArray();
-            let copied = 0;
-            for (const doc of legacyDocs) {
-                const exists = await db.collection("groupbookings").findOne({ _id: doc._id });
-                if (!exists) {
-                    if (!isDryRun) await db.collection("groupbookings").insertOne(doc);
-                    copied++;
+                console.log("✅ Renamed 'schedules' -> 'groupbookings'");
+            } else if (!colNames.includes("groupbookings")) {
+                await db.collection("schedules").rename("groupbookings");
+                console.log("✅ Renamed 'schedules' -> 'groupbookings'");
+            } else {
+                const legacyDocs = await db.collection("schedules").find({}).toArray();
+                let copied = 0;
+                for (const doc of legacyDocs) {
+                    const exists = await db.collection("groupbookings").findOne({ _id: doc._id });
+                    if (!exists) {
+                        await db.collection("groupbookings").insertOne(doc);
+                        copied++;
+                    }
                 }
-            }
-            console.log(`✅ Copied ${copied} missing docs from 'schedules' to 'groupbookings'`);
-            if (!isDryRun) {
+                console.log(`✅ Copied ${copied} missing docs from 'schedules' to 'groupbookings'`);
                 await db.collection("schedules").drop();
                 console.log("🗑️ Dropped legacy 'schedules' collection");
             }
+        } else {
+            console.log(`ℹ️ [DRY RUN] Would merge/rename ${schedulesCount} docs from 'schedules' -> 'groupbookings'`);
         }
     } else {
-        console.log("ℹ️ 'schedules' already migrated or does not exist");
+        console.log("ℹ️ 'schedules' does not exist (already migrated)");
     }
 
     // 1B. 'guestschedules' -> 'wishlistschedules'
     colNames = await getCollectionNames();
     if (colNames.includes("guestschedules")) {
-        if (!colNames.includes("wishlistschedules")) {
-            console.log("📦 Renaming collection 'guestschedules' -> 'wishlistschedules'...");
-            if (!isDryRun) {
+        const guestSchedCount = await db.collection("guestschedules").countDocuments();
+        const wishlistSchedCount = colNames.includes("wishlistschedules") ? await db.collection("wishlistschedules").countDocuments() : 0;
+        console.log(`📦 'guestschedules': ${guestSchedCount} docs, 'wishlistschedules': ${wishlistSchedCount} docs`);
+
+        if (!isDryRun) {
+            if (colNames.includes("wishlistschedules") && wishlistSchedCount === 0) {
+                await db.collection("wishlistschedules").drop();
                 await db.collection("guestschedules").rename("wishlistschedules");
-                console.log("✅ Successfully renamed 'guestschedules' -> 'wishlistschedules'");
-            }
-        } else {
-            console.log("ℹ️ Both 'guestschedules' and 'wishlistschedules' exist. Copying missing documents...");
-            const legacyDocs = await db.collection("guestschedules").find({}).toArray();
-            let copied = 0;
-            for (const doc of legacyDocs) {
-                const exists = await db.collection("wishlistschedules").findOne({ _id: doc._id });
-                if (!exists) {
-                    if (!isDryRun) await db.collection("wishlistschedules").insertOne(doc);
-                    copied++;
+                console.log("✅ Renamed 'guestschedules' -> 'wishlistschedules'");
+            } else if (!colNames.includes("wishlistschedules")) {
+                await db.collection("guestschedules").rename("wishlistschedules");
+                console.log("✅ Renamed 'guestschedules' -> 'wishlistschedules'");
+            } else {
+                const legacyDocs = await db.collection("guestschedules").find({}).toArray();
+                let copied = 0;
+                for (const doc of legacyDocs) {
+                    const exists = await db.collection("wishlistschedules").findOne({ _id: doc._id });
+                    if (!exists) {
+                        await db.collection("wishlistschedules").insertOne(doc);
+                        copied++;
+                    }
                 }
-            }
-            console.log(`✅ Copied ${copied} missing docs to 'wishlistschedules'`);
-            if (!isDryRun) {
+                console.log(`✅ Copied ${copied} missing docs from 'guestschedules' to 'wishlistschedules'`);
                 await db.collection("guestschedules").drop();
                 console.log("🗑️ Dropped legacy 'guestschedules' collection");
             }
+        } else {
+            console.log(`ℹ️ [DRY RUN] Would merge/rename ${guestSchedCount} docs from 'guestschedules' -> 'wishlistschedules'`);
         }
     } else {
-        console.log("ℹ️ 'guestschedules' already migrated or does not exist");
+        console.log("ℹ️ 'guestschedules' does not exist (already migrated)");
     }
 
     // 1C. 'hosthistories' -> 'hostauditlogs'
     colNames = await getCollectionNames();
     if (colNames.includes("hosthistories")) {
-        if (!colNames.includes("hostauditlogs")) {
-            console.log("📦 Renaming collection 'hosthistories' -> 'hostauditlogs'...");
-            if (!isDryRun) {
+        const histCount = await db.collection("hosthistories").countDocuments();
+        const auditCount = colNames.includes("hostauditlogs") ? await db.collection("hostauditlogs").countDocuments() : 0;
+        console.log(`📦 'hosthistories': ${histCount} docs, 'hostauditlogs': ${auditCount} docs`);
+
+        if (!isDryRun) {
+            if (colNames.includes("hostauditlogs") && auditCount === 0) {
+                await db.collection("hostauditlogs").drop();
                 await db.collection("hosthistories").rename("hostauditlogs");
-                console.log("✅ Successfully renamed 'hosthistories' -> 'hostauditlogs'");
-            }
-        } else {
-            console.log("ℹ️ Both 'hosthistories' and 'hostauditlogs' exist. Copying missing documents...");
-            const legacyDocs = await db.collection("hosthistories").find({}).toArray();
-            let copied = 0;
-            for (const doc of legacyDocs) {
-                const exists = await db.collection("hostauditlogs").findOne({ _id: doc._id });
-                if (!exists) {
-                    if (!isDryRun) await db.collection("hostauditlogs").insertOne(doc);
-                    copied++;
+                console.log("✅ Renamed 'hosthistories' -> 'hostauditlogs'");
+            } else if (!colNames.includes("hostauditlogs")) {
+                await db.collection("hosthistories").rename("hostauditlogs");
+                console.log("✅ Renamed 'hosthistories' -> 'hostauditlogs'");
+            } else {
+                const legacyDocs = await db.collection("hosthistories").find({}).toArray();
+                let copied = 0;
+                for (const doc of legacyDocs) {
+                    const exists = await db.collection("hostauditlogs").findOne({ _id: doc._id });
+                    if (!exists) {
+                        await db.collection("hostauditlogs").insertOne(doc);
+                        copied++;
+                    }
                 }
-            }
-            console.log(`✅ Copied ${copied} missing docs to 'hostauditlogs'`);
-            if (!isDryRun) {
+                console.log(`✅ Copied ${copied} missing docs from 'hosthistories' to 'hostauditlogs'`);
                 await db.collection("hosthistories").drop();
                 console.log("🗑️ Dropped legacy 'hosthistories' collection");
             }
+        } else {
+            console.log(`ℹ️ [DRY RUN] Would merge/rename ${histCount} docs from 'hosthistories' -> 'hostauditlogs'`);
         }
     } else {
-        console.log("ℹ️ 'hosthistories' already migrated or does not exist");
+        console.log("ℹ️ 'hosthistories' does not exist (already migrated)");
     }
 
     // ---------------------------------------------------------
@@ -161,9 +198,9 @@ async function runMigration() {
     console.log("🏨 2A. Migrating Host Details to 'hostdetails'...");
     const hostDetailsCol = db.collection("hostdetails");
     if (!isDryRun) {
+        await dropMatchingIndexes("hostdetails", idx => false);
         await hostDetailsCol.createIndex({ user: 1 }, { unique: true });
         await hostDetailsCol.createIndex({ status: 1 });
-        await hostDetailsCol.createIndex({ "verifyBadge.enabled": 1 });
     }
 
     const hostsWithDetails = await db.collection("users").find({
@@ -181,7 +218,7 @@ async function runMigration() {
         const h = user.hostDetails || {};
         const hostDoc = {
             user: user._id,
-            status: user.hostStatus || "pending_verification",
+            status: user.hostStatus || (user.role === "host" ? "approved" : "pending_verification"),
             yearsOfExperience: h.yearsOfExperience || 0,
             phone: h.phone || "",
             phoneVerified: h.phoneVerified || false,
@@ -217,6 +254,7 @@ async function runMigration() {
     console.log("👥 2B. Migrating Friends arrays to 'friendships'...");
     const friendshipsCol = db.collection("friendships");
     if (!isDryRun) {
+        await dropMatchingIndexes("friendships", idx => false);
         await friendshipsCol.createIndex({ user: 1, friend: 1 }, { unique: true });
         await friendshipsCol.createIndex({ user: 1, createdAt: -1 });
     }
@@ -253,6 +291,7 @@ async function runMigration() {
     console.log("📩 2C. Migrating Friend Requests to 'friendrequests'...");
     const friendRequestsCol = db.collection("friendrequests");
     if (!isDryRun) {
+        await dropMatchingIndexes("friendrequests", idx => false);
         await friendRequestsCol.createIndex({ sender: 1, recipient: 1 }, { unique: true });
         await friendRequestsCol.createIndex({ recipient: 1, status: 1, createdAt: -1 });
         await friendRequestsCol.createIndex({ sender: 1, status: 1 });
@@ -282,9 +321,11 @@ async function runMigration() {
     console.log(`✅ Processed ${requestsCreated} friend requests from ${usersWithRequests.length} users`);
 
     // 2D. Saved Posts -> 'savedposts' (field: experience)
-    console.log("🔖 2D. Migrating Saved Posts to 'savedposts' (with field 'experience')...");
+    console.log("🔖 2D. Migrating Saved Posts to 'savedposts' (field: experience)...");
     const savedPostsCol = db.collection("savedposts");
     if (!isDryRun) {
+        // Drop legacy indexes with 'post'
+        await dropMatchingIndexes("savedposts", idx => idx.name.includes("post") && !idx.name.includes("savedposts"));
         await savedPostsCol.createIndex({ user: 1, experience: 1 }, { unique: true });
         await savedPostsCol.createIndex({ user: 1, createdAt: -1 });
         await savedPostsCol.createIndex({ experience: 1 });
@@ -317,6 +358,7 @@ async function runMigration() {
     console.log("📌 2E. Migrating Pinned Experience Media to 'hostpinnedexperiencemedias'...");
     const pinnedCol = db.collection("hostpinnedexperiencemedias");
     if (!isDryRun) {
+        await dropMatchingIndexes("hostpinnedexperiencemedias", idx => false);
         await pinnedCol.createIndex({ user: 1, mediaKey: 1 }, { unique: true });
         await pinnedCol.createIndex({ user: 1, pinnedAt: -1 });
     }
@@ -388,6 +430,11 @@ async function runMigration() {
             }
         );
         console.log(`✅ Successfully cleaned up ${unsetResult.modifiedCount} user documents`);
+
+        // Build User model indexes
+        await db.collection("users").createIndex({ email: 1 }, { unique: true });
+        await db.collection("users").createIndex({ role: 1 });
+        await db.collection("users").createIndex({ role: 1, "location.city": 1 });
     } else {
         console.log(`ℹ️ [DRY RUN] Would unset legacy fields from ${usersToCleanCount} user documents`);
     }
@@ -406,18 +453,10 @@ async function runMigration() {
 
     console.log(`   Found: post (${bookingsPostCount}), postTitle (${bookingsTitleCount}), scheduleId (${bookingsSchedCount}), postType (${bookingsPostTypeCount})`);
     if (!isDryRun) {
-        // Drop legacy indexes on bookings before renaming
-        try {
-            const bookingIndexes = await db.collection("bookings").listIndexes().toArray();
-            for (const idx of bookingIndexes) {
-                if (idx.name.includes("post") || Object.keys(idx.key).includes("post") || idx.name.includes("scheduleId") || Object.keys(idx.key).includes("scheduleId")) {
-                    console.log(`   Dropping legacy index '${idx.name}' on bookings...`);
-                    await db.collection("bookings").dropIndex(idx.name);
-                }
-            }
-        } catch (idxErr) {
-            console.log("   (Index check on bookings completed)");
-        }
+        await dropMatchingIndexes("bookings", idx =>
+            idx.name.includes("post") || Object.keys(idx.key).includes("post") ||
+            idx.name.includes("scheduleId") || Object.keys(idx.key).includes("scheduleId")
+        );
 
         const bookingsRenameResult = await db.collection("bookings").updateMany(
             {},
@@ -446,18 +485,7 @@ async function runMigration() {
     const reviewsPostCount = await db.collection("reviews").countDocuments({ post: { $exists: true } });
     console.log(`   Found: post (${reviewsPostCount}) in reviews`);
     if (!isDryRun) {
-        // Drop legacy indexes referring to 'post' before renaming to avoid duplicate key errors during field unset
-        try {
-            const reviewIndexes = await db.collection("reviews").listIndexes().toArray();
-            for (const idx of reviewIndexes) {
-                if (idx.name.includes("post") || Object.keys(idx.key).includes("post")) {
-                    console.log(`   Dropping legacy index '${idx.name}' on reviews...`);
-                    await db.collection("reviews").dropIndex(idx.name);
-                }
-            }
-        } catch (idxErr) {
-            console.log("   (Index check on reviews completed)");
-        }
+        await dropMatchingIndexes("reviews", idx => idx.name.includes("post") || Object.keys(idx.key).includes("post"));
 
         const reviewsRenameResult = await db.collection("reviews").updateMany(
             { post: { $exists: true } },
@@ -469,14 +497,15 @@ async function runMigration() {
         );
         console.log(`✅ Renamed post -> experience in ${reviewsRenameResult.modifiedCount} reviews`);
 
-        // Create aligned indexes
+        // Create model indexes
         await db.collection("reviews").createIndex({ host: 1, createdAt: -1 });
         await db.collection("reviews").createIndex({ host: 1, reviewer: 1, experience: 1 }, { unique: true, sparse: true });
         await db.collection("reviews").createIndex({ experience: 1, createdAt: -1 });
     }
 
-    // 3C. 'groupbookings' (or 'schedules') collection
-    const gbColName = (await getCollectionNames()).includes("groupbookings") ? "groupbookings" : "schedules";
+    // 3C. 'groupbookings' collection
+    colNames = await getCollectionNames();
+    const gbColName = (!isDryRun && colNames.includes("groupbookings")) ? "groupbookings" : (colNames.includes("groupbookings") && (await db.collection("groupbookings").countDocuments()) > 0 ? "groupbookings" : (colNames.includes("schedules") ? "schedules" : "groupbookings"));
     console.log(`👥 3C. Aligning '${gbColName}' collection...`);
     const gbPostCount = await db.collection(gbColName).countDocuments({ post: { $exists: true } });
     const gbTitleCount = await db.collection(gbColName).countDocuments({ postTitle: { $exists: true } });
@@ -484,20 +513,10 @@ async function runMigration() {
     console.log(`   Found: post (${gbPostCount}), postTitle (${gbTitleCount}), postType (${gbTypeCount}) in ${gbColName}`);
 
     if (!isDryRun) {
-        // Drop legacy indexes on groupbookings before renaming
-        try {
-            const gbIndexes = await db.collection(gbColName).listIndexes().toArray();
-            for (const idx of gbIndexes) {
-                if (idx.name.includes("post") || Object.keys(idx.key).includes("post")) {
-                    console.log(`   Dropping legacy index '${idx.name}' on ${gbColName}...`);
-                    await db.collection(gbColName).dropIndex(idx.name);
-                }
-            }
-        } catch (idxErr) {
-            console.log("   (Index check on groupbookings completed)");
-        }
+        const liveGbCol = "groupbookings";
+        await dropMatchingIndexes(liveGbCol, idx => idx.name.includes("post") || Object.keys(idx.key).includes("post"));
 
-        const gbRenameResult = await db.collection(gbColName).updateMany(
+        const gbRenameResult = await db.collection(liveGbCol).updateMany(
             {},
             {
                 $rename: {
@@ -512,21 +531,62 @@ async function runMigration() {
         console.log(`✅ Updated ${gbRenameResult.modifiedCount} groupbooking documents`);
 
         // Create indexes
-        await db.collection(gbColName).createIndex({ initiator: 1, createdAt: -1 });
-        await db.collection(gbColName).createIndex({ experience: 1 });
-        await db.collection(gbColName).createIndex({ "invitedPeople.user": 1 });
-        await db.collection(gbColName).createIndex({ status: 1, isBooked: 1, initiatorPaid: 1 });
+        await db.collection(liveGbCol).createIndex({ initiator: 1, createdAt: -1 });
+        await db.collection(liveGbCol).createIndex({ experience: 1 });
+        await db.collection(liveGbCol).createIndex({ "invitedPeople.user": 1 });
+        await db.collection(liveGbCol).createIndex({ status: 1, isBooked: 1, initiatorPaid: 1 });
     }
 
-    // 3D. 'notifications' collection
-    console.log("🔔 3D. Aligning 'notifications' collection...");
+    // 3D. 'wishlistschedules' collection
+    colNames = await getCollectionNames();
+    const wsColName = colNames.includes("wishlistschedules") ? "wishlistschedules" : "guestschedules";
+    console.log(`🗓️ 3D. Aligning '${wsColName}' collection...`);
+    const wsPostCount = await db.collection(wsColName).countDocuments({ post: { $exists: true } });
+    console.log(`   Found: post (${wsPostCount}) in ${wsColName}`);
+    if (!isDryRun) {
+        await dropMatchingIndexes(wsColName, idx => idx.name.includes("post") || Object.keys(idx.key).includes("post"));
+
+        if (wsPostCount > 0) {
+            await db.collection(wsColName).updateMany(
+                { post: { $exists: true } },
+                { $rename: { post: "experience" } }
+            );
+            console.log(`✅ Renamed post -> experience in ${wsColName}`);
+        }
+
+        await db.collection(wsColName).createIndex({ user: 1, experience: 1 });
+        await db.collection(wsColName).createIndex({ user: 1, createdAt: -1 });
+        await db.collection(wsColName).createIndex({ status: 1, scheduledDateTime: 1 });
+    }
+
+    // 3E. 'savedposts' collection
+    console.log("🔖 3E. Aligning 'savedposts' collection...");
+    const spPostCount = await db.collection("savedposts").countDocuments({ post: { $exists: true } });
+    console.log(`   Found: post (${spPostCount}) in savedposts`);
+    if (!isDryRun) {
+        await dropMatchingIndexes("savedposts", idx => idx.name.includes("post") && !idx.name.includes("savedposts"));
+
+        if (spPostCount > 0) {
+            await db.collection("savedposts").updateMany(
+                { post: { $exists: true } },
+                { $rename: { post: "experience" } }
+            );
+            console.log(`✅ Renamed post -> experience in ${spPostCount} savedposts`);
+        }
+
+        await db.collection("savedposts").createIndex({ user: 1, experience: 1 }, { unique: true });
+        await db.collection("savedposts").createIndex({ user: 1, createdAt: -1 });
+        await db.collection("savedposts").createIndex({ experience: 1 });
+    }
+
+    // 3F. 'notifications' collection
+    console.log("🔔 3F. Aligning 'notifications' collection...");
     const notifPostMeta = await db.collection("notifications").countDocuments({ "metadata.postId": { $exists: true } });
     const notifSchedMeta = await db.collection("notifications").countDocuments({ "metadata.scheduleId": { $exists: true } });
     const notifPostLink = await db.collection("notifications").countDocuments({ link: { $regex: "^/post/" } });
     console.log(`   Found: metadata.postId (${notifPostMeta}), metadata.scheduleId (${notifSchedMeta}), /post/ links (${notifPostLink})`);
 
     if (!isDryRun) {
-        // Rename metadata fields
         const notifRenameResult = await db.collection("notifications").updateMany(
             {},
             {
@@ -538,7 +598,6 @@ async function runMigration() {
         );
         console.log(`✅ Renamed notification metadata fields in ${notifRenameResult.modifiedCount} documents`);
 
-        // Migrate links from /post/... to /experience/...
         const linkNotifs = await db.collection("notifications").find({ link: { $regex: "^/post/" } }).toArray();
         let linksUpdated = 0;
         for (const notif of linkNotifs) {
@@ -551,12 +610,11 @@ async function runMigration() {
         }
         console.log(`✅ Updated ${linksUpdated} notification links to /experience/...`);
 
-        // Create indexes
         await db.collection("notifications").createIndex({ recipient: 1, createdAt: -1 });
     }
 
-    // 3E. 'messages' collection
-    console.log("💬 3E. Aligning 'messages' collection...");
+    // 3G. 'messages' collection
+    console.log("💬 3G. Aligning 'messages' collection...");
     const msgPostMeta = await db.collection("messages").countDocuments({ "locationData.postId": { $exists: true } });
     console.log(`   Found: locationData.postId (${msgPostMeta}) in messages`);
     if (!isDryRun) {
@@ -570,14 +628,13 @@ async function runMigration() {
         );
         console.log(`✅ Renamed locationData.postId -> experienceId in ${msgRenameResult.modifiedCount} messages`);
 
-        // Create indexes
         await db.collection("messages").createIndex({ conversationId: 1, createdAt: 1 });
         await db.collection("messages").createIndex({ sender: 1 });
         await db.collection("messages").createIndex({ recipient: 1, read: 1 });
     }
 
-    // 3F. 'conversations' collection
-    console.log("🗨️ 3F. Aligning 'conversations' collection...");
+    // 3H. 'conversations' collection
+    console.log("🗨️ 3H. Aligning 'conversations' collection...");
     const convItineraryCount = await db.collection("conversations").countDocuments({ itinerary: { $exists: true } });
     console.log(`   Found: itinerary (${convItineraryCount}) in conversations`);
     if (!isDryRun) {
@@ -589,13 +646,12 @@ async function runMigration() {
         );
         console.log(`✅ Unset deprecated itinerary from ${convResult.modifiedCount} conversations`);
 
-        // Create indexes
         await db.collection("conversations").createIndex({ participants: 1 });
         await db.collection("conversations").createIndex({ updatedAt: -1 });
     }
 
-    // 3G. 'posts' (Experience) collection cleanup
-    console.log("🏔️ 3G. Cleaning up 'posts' (Experience) collection...");
+    // 3I. 'posts' (Experience) collection cleanup
+    console.log("🏔️ 3I. Cleaning up 'posts' (Experience) collection...");
     const postsWithReactions = await db.collection("posts").countDocuments({ reactions: { $exists: true } });
     const postsWithPostType = await db.collection("posts").countDocuments({ postType: { $exists: true } });
     const postsWithBedrooms = await db.collection("posts").countDocuments({ "capacity.bedrooms": { $exists: true } });
@@ -606,12 +662,15 @@ async function runMigration() {
     console.log(`   Found: reactions (${postsWithReactions}), postType (${postsWithPostType}), hotel remnants (${postsWithBedrooms + postsWithBathrooms + postsWithBeds}), missing clicks (${postsMissingClicks})`);
 
     if (!isDryRun) {
+        await dropMatchingIndexes("posts", idx => idx.name.includes("postType") || Object.keys(idx.key).includes("postType"));
+
         const postsCleanupResult = await db.collection("posts").updateMany(
             {},
             {
                 $unset: {
                     reactions: "",
                     postType: "",
+                    stay: "",
                     "capacity.bedrooms": "",
                     "capacity.bathrooms": "",
                     "capacity.beds": ""
@@ -646,9 +705,10 @@ async function runMigration() {
     // ---------------------------------------------------------
     // STEP 4: Normalize 'hostauditlogs'
     // ---------------------------------------------------------
-    const auditColName = (await getCollectionNames()).includes("hostauditlogs") ? "hostauditlogs" : "hosthistories";
+    colNames = await getCollectionNames();
+    const auditColName = (!isDryRun && colNames.includes("hostauditlogs")) ? "hostauditlogs" : (colNames.includes("hostauditlogs") && (await db.collection("hostauditlogs").countDocuments()) > 0 ? "hostauditlogs" : (colNames.includes("hosthistories") ? "hosthistories" : "hostauditlogs"));
     console.log(`\n--- STEP 4: Normalize '${auditColName}' Snapshot Format ---`);
-    const logsCol = db.collection(auditColName);
+    const logsCol = db.collection(isDryRun ? auditColName : "hostauditlogs");
     const logsWithoutSnapshot = await logsCol.find({ snapshot: { $exists: false } }).toArray();
     console.log(`   Found ${logsWithoutSnapshot.length} audit logs missing 'snapshot' wrapper in ${auditColName}`);
 
@@ -722,73 +782,95 @@ async function runMigration() {
     // ---------------------------------------------------------
     console.log("\n--- STEP 5: Drop Deprecated Collections ---");
     colNames = await getCollectionNames();
-    if (colNames.includes("communityposts")) {
-        console.log("🗑️ Dropping deprecated 'communityposts' collection...");
-        if (!isDryRun) {
-            await db.collection("communityposts").drop();
-            console.log("✅ Successfully dropped 'communityposts'");
+    const deprecatedCols = ["communityposts", "schedules", "guestschedules", "hosthistories"];
+    for (const depCol of deprecatedCols) {
+        if (colNames.includes(depCol)) {
+            console.log(`🗑️ Dropping deprecated '${depCol}' collection...`);
+            if (!isDryRun) {
+                await db.collection(depCol).drop();
+                console.log(`✅ Successfully dropped '${depCol}'`);
+            }
+        } else {
+            console.log(`ℹ️ '${depCol}' does not exist`);
         }
-    } else {
-        console.log("ℹ️ 'communityposts' does not exist");
     }
 
     // ---------------------------------------------------------
     // STEP 6: Post-Migration Verification Summary
     // ---------------------------------------------------------
-    console.log("\n" + "=".repeat(70));
+    console.log("\n" + "=".repeat(75));
     console.log("📊 POST-MIGRATION DATABASE STATE VERIFICATION");
-    console.log("=".repeat(70));
+    console.log("=".repeat(75));
 
     const finalCols = await db.listCollections().toArray();
     for (const c of finalCols) {
         const count = await db.collection(c.name).countDocuments();
-        console.log(`📁 ${c.name.padEnd(28)} : ${count} documents`);
+        console.log(`📁 ${c.name.padEnd(30)} : ${count} documents`);
     }
 
     if (!isDryRun) {
         console.log("\n🔍 Verification Assertions:");
         const assertBookingsPost = await db.collection("bookings").countDocuments({ post: { $exists: true } });
         const assertBookingsSched = await db.collection("bookings").countDocuments({ scheduleId: { $exists: true } });
+        const assertBookingsPostType = await db.collection("bookings").countDocuments({ postType: { $exists: true } });
         const assertReviewsPost = await db.collection("reviews").countDocuments({ post: { $exists: true } });
         const assertGroupBookingsPost = await db.collection("groupbookings").countDocuments({ post: { $exists: true } });
+        const assertGroupBookingsPostType = await db.collection("groupbookings").countDocuments({ postType: { $exists: true } });
+        const assertSavedPostsPost = await db.collection("savedposts").countDocuments({ post: { $exists: true } });
         const assertUsersHostDetails = await db.collection("users").countDocuments({ hostDetails: { $exists: true } });
         const assertUsersFriends = await db.collection("users").countDocuments({ friends: { $exists: true } });
         const assertUsersSaved = await db.collection("users").countDocuments({ savedPosts: { $exists: true } });
+        const assertPostsPostType = await db.collection("posts").countDocuments({ postType: { $exists: true } });
+        const assertPostsReactions = await db.collection("posts").countDocuments({ reactions: { $exists: true } });
         const assertNotifsPost = await db.collection("notifications").countDocuments({ "metadata.postId": { $exists: true } });
         const assertMessagesPost = await db.collection("messages").countDocuments({ "locationData.postId": { $exists: true } });
+        const assertAuditWithoutSnapshot = await db.collection("hostauditlogs").countDocuments({ snapshot: { $exists: false } });
 
         console.log(`- bookings with legacy 'post'       : ${assertBookingsPost} (expected: 0)`);
         console.log(`- bookings with legacy 'scheduleId' : ${assertBookingsSched} (expected: 0)`);
+        console.log(`- bookings with legacy 'postType'   : ${assertBookingsPostType} (expected: 0)`);
         console.log(`- reviews with legacy 'post'        : ${assertReviewsPost} (expected: 0)`);
         console.log(`- groupbookings with legacy 'post'  : ${assertGroupBookingsPost} (expected: 0)`);
+        console.log(`- groupbookings with legacy 'postType': ${assertGroupBookingsPostType} (expected: 0)`);
+        console.log(`- savedposts with legacy 'post'     : ${assertSavedPostsPost} (expected: 0)`);
         console.log(`- users with legacy 'hostDetails'   : ${assertUsersHostDetails} (expected: 0)`);
         console.log(`- users with legacy 'friends'       : ${assertUsersFriends} (expected: 0)`);
         console.log(`- users with legacy 'savedPosts'    : ${assertUsersSaved} (expected: 0)`);
+        console.log(`- posts with legacy 'postType'      : ${assertPostsPostType} (expected: 0)`);
+        console.log(`- posts with legacy 'reactions'     : ${assertPostsReactions} (expected: 0)`);
         console.log(`- notifs with legacy 'postId'       : ${assertNotifsPost} (expected: 0)`);
         console.log(`- messages with legacy 'postId'     : ${assertMessagesPost} (expected: 0)`);
+        console.log(`- audit logs without 'snapshot'    : ${assertAuditWithoutSnapshot} (expected: 0)`);
 
         const allPassed = (
             assertBookingsPost === 0 &&
             assertBookingsSched === 0 &&
+            assertBookingsPostType === 0 &&
             assertReviewsPost === 0 &&
             assertGroupBookingsPost === 0 &&
+            assertGroupBookingsPostType === 0 &&
+            assertSavedPostsPost === 0 &&
             assertUsersHostDetails === 0 &&
             assertUsersFriends === 0 &&
             assertUsersSaved === 0 &&
+            assertPostsPostType === 0 &&
+            assertPostsReactions === 0 &&
             assertNotifsPost === 0 &&
-            assertMessagesPost === 0
+            assertMessagesPost === 0 &&
+            assertAuditWithoutSnapshot === 0
         );
 
         if (allPassed) {
             console.log("\n✅ ALL ASSERTIONS PASSED! Database schema is 100% aligned with models.");
         } else {
             console.error("\n❌ Some assertions failed. Please inspect logs above.");
+            process.exit(1);
         }
     } else {
         console.log("\nℹ️ [DRY RUN COMPLETE] No changes were written. Run without --dry-run to apply.");
     }
 
-    console.log("=".repeat(70));
+    console.log("=".repeat(75));
     await mongoose.disconnect();
     process.exit(0);
 }
