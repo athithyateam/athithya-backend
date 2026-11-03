@@ -45,6 +45,11 @@ export class GoogleDriveService {
             experiences: null,
             momentos: null
         };
+
+        this.ensureFolderStructure = this.ensureFolderStructure.bind(this);
+        this.syncMediaFromUrl = this.syncMediaFromUrl.bind(this);
+        this.syncMediaItems = this.syncMediaItems.bind(this);
+        this.deleteMedia = this.deleteMedia.bind(this);
     }
 
     public static getInstance(
@@ -291,22 +296,26 @@ export class GoogleDriveService {
 export const googleDriveService = GoogleDriveService.getInstance();
 export default GoogleDriveService;
 
-// Convenience function exports for backward compatibility
-export const ensureFolderStructure = (parentFolderId?: string) => googleDriveService.ensureFolderStructure(parentFolderId);
+// Convenience function exports for backward compatibility calling prototype directly
+export const ensureFolderStructure = (parentFolderId?: string) =>
+    GoogleDriveService.prototype.ensureFolderStructure.call(googleDriveService, parentFolderId);
 export const syncMediaFromUrl = (
     urlOrOptions: string | SyncMediaOptions,
     fileName?: string,
     category?: string,
     mimeType?: string,
     data?: any
-) => googleDriveService.syncMediaFromUrl(urlOrOptions, fileName, category, mimeType, data);
-export const deleteMedia = (fileId: string) => googleDriveService.deleteMedia(fileId);
+) =>
+    GoogleDriveService.prototype.syncMediaFromUrl.call(googleDriveService, urlOrOptions, fileName, category, mimeType, data);
+export const deleteMedia = (fileId: string) =>
+    GoogleDriveService.prototype.deleteMedia.call(googleDriveService, fileId);
 export const syncMediaItems = (
     items: Array<{ url?: string; googleDriveFileId?: string; [key: string]: any }>,
     namePrefix: string,
     category?: string,
     defaultMimeType?: string
-) => googleDriveService.syncMediaItems(items, namePrefix, category, defaultMimeType);
+) =>
+    GoogleDriveService.prototype.syncMediaItems.call(googleDriveService, items, namePrefix, category, defaultMimeType);
 export const uploadMediaToDrive = syncMediaFromUrl;
 export const deleteMediaFromDrive = deleteMedia;
 
