@@ -230,6 +230,9 @@ export class BookingCreationService {
 
         const experience = await this.experienceModel.findById(experienceId).populate("user");
         if (!experience) { throw new NotFoundError("Experience not found"); }
+        if (experience.isHidden) {
+            throw new BadRequestError("This experience is currently hidden and not available for booking");
+        }
         if (experience.status !== "active" && experience.status !== "pending") {
             throw new BadRequestError("This experience is not available for booking");
         }

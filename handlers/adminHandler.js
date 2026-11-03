@@ -16,7 +16,8 @@ const {
     getPendingExperiences, 
     updateExperience, 
     updateExperienceStatus, 
-    deleteExperience 
+    deleteExperience,
+    toggleHideExperience 
 } = require("./admin/experiences");
 const { 
     getAllBookings, 
@@ -42,6 +43,7 @@ module.exports = {
     updateExperience,
     updateExperienceStatus,
     deleteExperience,
+    toggleHideExperience,
     getAllBookings,
     updateBooking,
     deleteBooking,

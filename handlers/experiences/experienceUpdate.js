@@ -62,12 +62,16 @@ const updateExperienceStatus = async (req, res) => {
  */
 const requestHideExperience = async (req, res) => {
     try {
-        const { action, reason } = req.body;
+        const { action, reason } = req.body || {};
+        const userRole = req.user?.role || "user";
+        // Default action to "request_hide" for hosts/users, or "hide" if admin called without action
+        const effectiveAction = action || (userRole === "admin" ? "hide" : "request_hide");
+
         const result = await experienceService.toggleHideExperience(
             req.params.id,
-            req.user.userId || req.user.id,
-            req.user.role,
-            action,
+            req.user?.userId || req.user?.id,
+            userRole,
+            effectiveAction,
             reason,
             req.app
         );

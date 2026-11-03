@@ -111,3 +111,28 @@ exports.deleteExperience = async (req, res) => {
         return res.status(err.statusCode || 500).json({ success: false, message: err.message });
     }
 };
+
+/**
+ * Controller: Admin directly toggles hide/unhide on an experience listing
+ */
+exports.toggleHideExperience = async (req, res) => {
+    try {
+        const { action = "hide", reason } = req.body || {};
+        const result = await experienceService.toggleHideExperience(
+            req.params.id,
+            req.user?.userId || req.user?.id,
+            "admin",
+            action,
+            reason,
+            req.app
+        );
+
+        return res.json({
+            success: true,
+            ...result
+        });
+    } catch (err) {
+        console.error("Admin toggle hide experience error:", err);
+        return res.status(err.statusCode || 500).json({ success: false, message: err.message });
+    }
+};

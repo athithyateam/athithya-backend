@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const hostAuditLogSchema = new mongoose.Schema({
     type: { 
         type: String, 
-        enum: ["profile_update", "experience_delete"], 
+        enum: ["profile_update", "experience_delete", "experience_hide", "experience_unhide"], 
         required: true,
         index: true
     },

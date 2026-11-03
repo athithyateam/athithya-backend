@@ -112,6 +112,21 @@ export class ExperienceActionService {
         }
     }
 
+    private async recordHideAudit(experience: any, actionType: "experience_hide" | "experience_unhide", hostName: string, reason?: string): Promise<void> {
+        try {
+            const snapshot: any = { experienceId: experience._id, title: experience.title };
+            if (reason) snapshot.reason = reason;
+            await recordHostAuditLog(this.hostAuditLogModel, {
+                type: actionType,
+                hostId: experience.user?._id || experience.user,
+                hostName,
+                snapshot
+            }, { hostId: experience.user?._id || experience.user, type: actionType });
+        } catch (auditErr) {
+            console.error(`Error recording host audit log for ${actionType}:`, auditErr);
+        }
+    }
+
     // ==================== COMMAND ACTIONS ====================
 
     public async createExperience(userId: string, userRole: string, experiencePayload: any, _files: any = null, reqOrApp: any = null): Promise<any> {
@@ -242,11 +257,21 @@ export class ExperienceActionService {
         status: string,
         remarks?: string,
         adminUserId?: string,
-        _reqOrApp: any = null
+        reqOrApp: any = null
     ): Promise<any> {
-        if (!["active", "inactive", "archived", "pending"].includes(status)) {
-            throw new BadRequestError("Invalid status");
+        const normStatus = (status || "").toLowerCase().trim();
+        const validStatuses = ["active", "approved", "inactive", "rejected", "archived", "pending", "hidden", "hide", "unhidden", "unhide"];
+        if (!validStatuses.includes(normStatus)) {
+            throw new BadRequestError(`Invalid status. Must be one of: ${validStatuses.join(", ")}`);
         }
+
+        if (normStatus === "hidden" || normStatus === "hide") {
+            return this.toggleHideExperience(experienceId, adminUserId || "", "admin", "hide", remarks, reqOrApp);
+        }
+        if (normStatus === "unhidden" || normStatus === "unhide") {
+            return this.toggleHideExperience(experienceId, adminUserId || "", "admin", "unhide", remarks, reqOrApp);
+        }
+
         const experience = await this.experienceModel.findById(experienceId).populate("user");
         if (!experience) throw new NotFoundError("Experience not found");
 
@@ -256,9 +281,12 @@ export class ExperienceActionService {
         const hostFirstName = hostUser?.firstname || "Host";
         const experienceTitle = experience.title;
 
+        const isApproved = normStatus === "active" || normStatus === "approved";
+        const isRejected = normStatus === "inactive" || normStatus === "rejected";
+
         // ── 1. Handle Deletion Approval / Rejection ──
         if (experience.deleteRequested) {
-            if (status === "active") {
+            if (isApproved) {
                 // Admin approves deletion: archive audit log, delete S3 and Drive assets, cancel bookings, delete bookmarks & reviews, delete document
                 try {
                     const hostName = hostUser ? `${hostUser.firstname} ${hostUser.lastname}` : "Host";
@@ -320,7 +348,7 @@ export class ExperienceActionService {
                 }
 
                 return { success: true, message: "Experience deletion request approved and deleted successfully" };
-            } else if (status === "inactive") {
+            } else if (isRejected) {
                 // Admin rejects deletion: reset deleteRequested flag
                 experience.deleteRequested = false;
                 experience.deleteRequestedAt = undefined;
@@ -360,11 +388,15 @@ export class ExperienceActionService {
 
         // ── 2. Handle Hide Request Approval / Rejection ──
         if (experience.hideRequested) {
-            if (status === "active") {
+            const hostName = hostUser ? `${hostUser.firstname} ${hostUser.lastname}` : "Host";
+            if (isApproved) {
                 experience.isHidden = true;
+                experience.hiddenAt = new Date();
                 experience.hideRequested = false;
                 experience.unhideRequested = false;
                 await experience.save();
+
+                await this.recordHideAudit(experience, "experience_hide", hostName, experience.hideReason);
 
                 await notificationService.sendNotification({
                     recipient: hostId,
@@ -375,8 +407,27 @@ export class ExperienceActionService {
                     link: `/profile/${hostId}`
                 });
 
+                if (hostEmail) {
+                    const subject = "Experience Hide Request Approved - Athithya";
+                    const htmlContent = `
+                        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px;">
+                            <div style="background-color: #1a1a1a; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+                                <h1 style="color: #C59A2F; margin: 0; font-size: 28px; letter-spacing: 2px;">ATHITHYA</h1>
+                            </div>
+                            <div style="padding: 20px;">
+                                <h2 style="color: #2e7d32; margin-top: 0;">Experience Hide Request Approved</h2>
+                                <p style="color: #333; font-size: 16px; line-height: 1.6;">Hi ${hostFirstName},</p>
+                                <p style="color: #555; font-size: 16px; line-height: 1.6;">
+                                    Your request to hide experience "${experience.title}" has been approved. The experience is now hidden from public listings.
+                                </p>
+                            </div>
+                        </div>
+                    `;
+                    sendHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send hide approved email:", err));
+                }
+
                 return { success: true, message: "Experience hide request approved successfully", experience };
-            } else if (status === "inactive") {
+            } else if (isRejected) {
                 experience.hideRequested = false;
                 await experience.save();
 
@@ -384,10 +435,29 @@ export class ExperienceActionService {
                     recipient: hostId,
                     sender: adminUserId || hostId,
                     title: "Experience Hide Request Rejected",
-                    message: `Your request to hide experience "${experience.title}" was reviewed and rejected.`,
+                    message: `Your request to hide experience "${experience.title}" was reviewed and rejected.${remarks ? ` Remarks: ${remarks}` : ""}`,
                     type: "info",
                     link: `/profile/${hostId}`
                 });
+
+                if (hostEmail) {
+                    const subject = "Experience Hide Request Rejected - Athithya";
+                    const htmlContent = `
+                        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px;">
+                            <div style="background-color: #1a1a1a; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+                                <h1 style="color: #C59A2F; margin: 0; font-size: 28px; letter-spacing: 2px;">ATHITHYA</h1>
+                            </div>
+                            <div style="padding: 20px;">
+                                <h2 style="color: #c62828; margin-top: 0;">Experience Hide Request Rejected</h2>
+                                <p style="color: #333; font-size: 16px; line-height: 1.6;">Hi ${hostFirstName},</p>
+                                <p style="color: #555; font-size: 16px; line-height: 1.6;">
+                                    Your request to hide experience "${experience.title}" was reviewed and rejected.${remarks ? ` Remarks: ${remarks}` : ""}. The experience remains visible.
+                                </p>
+                            </div>
+                        </div>
+                    `;
+                    sendHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send hide rejected email:", err));
+                }
 
                 return { success: true, message: "Experience hide request rejected", experience };
             }
@@ -395,11 +465,17 @@ export class ExperienceActionService {
 
         // ── 3. Handle Unhide Request Approval / Rejection ──
         if (experience.unhideRequested) {
-            if (status === "active") {
+            const hostName = hostUser ? `${hostUser.firstname} ${hostUser.lastname}` : "Host";
+            if (isApproved) {
                 experience.isHidden = false;
+                experience.hiddenAt = undefined;
+                experience.hideReason = "";
                 experience.unhideRequested = false;
+                experience.unhideRequestedAt = undefined;
                 experience.hideRequested = false;
                 await experience.save();
+
+                await this.recordHideAudit(experience, "experience_unhide", hostName);
 
                 await notificationService.sendNotification({
                     recipient: hostId,
@@ -410,26 +486,65 @@ export class ExperienceActionService {
                     link: `/experiences/${experience._id}`
                 });
 
+                if (hostEmail) {
+                    const subject = "Experience Unhide Request Approved - Athithya";
+                    const htmlContent = `
+                        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px;">
+                            <div style="background-color: #1a1a1a; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+                                <h1 style="color: #C59A2F; margin: 0; font-size: 28px; letter-spacing: 2px;">ATHITHYA</h1>
+                            </div>
+                            <div style="padding: 20px;">
+                                <h2 style="color: #2e7d32; margin-top: 0;">Experience Unhide Request Approved</h2>
+                                <p style="color: #333; font-size: 16px; line-height: 1.6;">Hi ${hostFirstName},</p>
+                                <p style="color: #555; font-size: 16px; line-height: 1.6;">
+                                    Your request to unhide experience "${experience.title}" has been approved. The experience is now live on the platform and accepting bookings.
+                                </p>
+                            </div>
+                        </div>
+                    `;
+                    sendHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send unhide approved email:", err));
+                }
+
                 return { success: true, message: "Experience unhide request approved successfully", experience };
-            } else if (status === "inactive") {
+            } else if (isRejected) {
                 experience.unhideRequested = false;
+                experience.unhideRequestedAt = undefined;
                 await experience.save();
 
                 await notificationService.sendNotification({
                     recipient: hostId,
                     sender: adminUserId || hostId,
                     title: "Experience Unhide Request Rejected",
-                    message: `Your request to unhide experience "${experience.title}" was reviewed and rejected.`,
+                    message: `Your request to unhide experience "${experience.title}" was reviewed and rejected.${remarks ? ` Remarks: ${remarks}` : ""}`,
                     type: "info",
                     link: `/profile/${hostId}`
                 });
+
+                if (hostEmail) {
+                    const subject = "Experience Unhide Request Rejected - Athithya";
+                    const htmlContent = `
+                        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px;">
+                            <div style="background-color: #1a1a1a; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+                                <h1 style="color: #C59A2F; margin: 0; font-size: 28px; letter-spacing: 2px;">ATHITHYA</h1>
+                            </div>
+                            <div style="padding: 20px;">
+                                <h2 style="color: #c62828; margin-top: 0;">Experience Unhide Request Rejected</h2>
+                                <p style="color: #333; font-size: 16px; line-height: 1.6;">Hi ${hostFirstName},</p>
+                                <p style="color: #555; font-size: 16px; line-height: 1.6;">
+                                    Your request to unhide experience "${experience.title}" was reviewed and rejected.${remarks ? ` Remarks: ${remarks}` : ""}. The experience remains hidden.
+                                </p>
+                            </div>
+                        </div>
+                    `;
+                    sendHtmlEmail(hostEmail, subject, htmlContent).catch(err => console.error("Failed to send unhide rejected email:", err));
+                }
 
                 return { success: true, message: "Experience unhide request rejected", experience };
             }
         }
 
         // ── 4. General Status Updates (Approval / Rejection) ──
-        if (status === "active") {
+        if (isApproved) {
             if (experience.pendingUpdate) {
                 await cleanupMediaAssets(this.storageService, experience.photos, experience.pendingUpdate.photos || []);
                 await cleanupMediaAssets(this.storageService, experience.videos, experience.pendingUpdate.videos || []);
@@ -438,7 +553,10 @@ export class ExperienceActionService {
             }
             experience.status = "active";
             experience.approvedAt = new Date();
-            experience.isHidden = false;
+            // Preserve isHidden state if experience was previously hidden; ensure visible on first approval
+            if (!experience.isHidden) {
+                experience.isHidden = false;
+            }
             experience.deleteRequested = false;
             experience.hideRequested = false;
             experience.unhideRequested = false;
@@ -451,14 +569,14 @@ export class ExperienceActionService {
                     if (pUp || vUp) await this.experienceModel.findByIdAndUpdate(experience._id, { photos: experience.photos, videos: experience.videos });
                 } catch (e) { console.error("Drive sync error on status approval:", e); }
             });
-        } else if (status === "inactive") {
+        } else if (isRejected) {
             experience.status = "inactive";
             experience.pendingUpdate = null;
             experience.deleteRequested = false;
             experience.hideRequested = false;
             experience.unhideRequested = false;
         } else {
-            experience.status = status;
+            experience.status = normStatus;
         }
 
         if (remarks !== undefined) {
@@ -470,8 +588,7 @@ export class ExperienceActionService {
         await this.experienceModel.updateOne({ _id: experience._id }, { $unset: { pendingUpdate: 1 } });
 
         // Notifications & Emails on General Status Decisions
-        if (status === "active" || status === "inactive") {
-            const isApproved = status === "active";
+        if (isApproved || isRejected) {
             const emailSubject = isApproved ? "Experience Approved & Published! - Athithya" : "Experience Submission Update - Athithya";
             const emailMessage = isApproved
                 ? `Congratulations! Your experience "${experience.title}" has been approved and is now active on Athithya.`
@@ -524,12 +641,27 @@ export class ExperienceActionService {
 
         const hostUser = await this.userModel.findById(experience.user);
         const hostName = hostUser ? `${hostUser.firstname} ${hostUser.lastname}` : "Host";
+        const normalizedAction = (action || "").trim().toLowerCase();
 
-        if (action === "request_hide") {
+        // ── 1. Request to hide ──
+        if (normalizedAction === "request_hide") {
+            if (experience.isHidden) {
+                throw new BadRequestError("Experience is already hidden");
+            }
+            if (experience.hideRequested) {
+                return {
+                    message: "Hide request is already pending admin review",
+                    hideRequested: true,
+                    experience
+                };
+            }
+
             experience.hideRequested = true;
             experience.unhideRequested = false;
+            experience.unhideRequestedAt = undefined;
             experience.hideReason = reason || "Hidden requested by host";
             await experience.save();
+
             await this.notifyExperienceAdmin({
                 experienceId: experience._id,
                 userId,
@@ -540,44 +672,88 @@ export class ExperienceActionService {
                 emailSubject: `Experience Hide Request - ${experience.title}`,
                 reqOrApp
             });
-            return { message: "Hide request submitted for admin review", hideRequested: true };
+
+            return {
+                message: "Hide request submitted for admin review",
+                hideRequested: true,
+                experience
+            };
         }
 
-        if (action === "hide") {
+        // ── 2. Direct hide ──
+        if (normalizedAction === "hide") {
+            if (experience.isHidden) {
+                return {
+                    message: "Experience is already hidden",
+                    isHidden: true,
+                    experience
+                };
+            }
+
             experience.isHidden = true;
             experience.hiddenAt = new Date();
-            experience.hideReason = reason || "Hidden by host";
+            experience.hideReason = reason || (userRole === "admin" ? "Hidden by admin" : "Hidden by host");
             experience.hideRequested = false;
             experience.unhideRequested = false;
             experience.unhideRequestedAt = undefined;
             await experience.save();
-            await recordHostAuditLog(this.hostAuditLogModel, {
-                type: "experience_hide",
-                hostId: experience.user,
-                hostName,
-                snapshot: { experienceId: experience._id, title: experience.title, reason: experience.hideReason }
-            }, { hostId: experience.user, type: "experience_hide" });
-            return { message: "Experience hidden successfully", isHidden: true };
+
+            await this.recordHideAudit(experience, "experience_hide", hostName, experience.hideReason);
+
+            return {
+                message: "Experience hidden successfully",
+                isHidden: true,
+                experience
+            };
         }
 
-        if (action === "request_unhide") {
-            if (!experience.isHidden) throw new BadRequestError("Experience is not currently hidden");
+        // ── 3. Request to unhide ──
+        if (normalizedAction === "request_unhide") {
+            if (!experience.isHidden) {
+                throw new BadRequestError("Experience is not currently hidden");
+            }
+            if (experience.unhideRequested) {
+                return {
+                    message: "Unhide request is already pending admin review",
+                    unhideRequested: true,
+                    experience
+                };
+            }
+
             experience.unhideRequested = true;
             experience.hideRequested = false;
             experience.unhideRequestedAt = new Date();
             await experience.save();
+
             await this.notifyExperienceAdmin({
                 experienceId: experience._id,
                 userId,
                 title: "Experience Unhide Request",
                 message: `Host ${hostName} requested to unhide "${experience.title}".`,
+                emailSubject: `Experience Unhide Request - ${experience.title}`,
                 reqOrApp
             });
-            return { message: "Unhide request submitted for admin review", unhideRequested: true };
+
+            return {
+                message: "Unhide request submitted for admin review",
+                unhideRequested: true,
+                experience
+            };
         }
 
-        if (action === "unhide") {
-            if (userRole !== "admin") throw new ForbiddenError("Only admins can approve unhiding an experience");
+        // ── 4. Direct unhide ──
+        if (normalizedAction === "unhide") {
+            if (userRole !== "admin") {
+                throw new ForbiddenError("Only admins can unhide an experience directly");
+            }
+            if (!experience.isHidden) {
+                return {
+                    message: "Experience is already visible",
+                    isHidden: false,
+                    experience
+                };
+            }
+
             experience.isHidden = false;
             experience.hiddenAt = undefined;
             experience.hideReason = "";
@@ -585,13 +761,14 @@ export class ExperienceActionService {
             experience.unhideRequested = false;
             experience.unhideRequestedAt = undefined;
             await experience.save();
-            await recordHostAuditLog(this.hostAuditLogModel, {
-                type: "experience_unhide",
-                hostId: experience.user,
-                hostName,
-                snapshot: { experienceId: experience._id, title: experience.title }
-            }, { hostId: experience.user, type: "experience_unhide" });
-            return { message: "Experience unhidden successfully", isHidden: false };
+
+            await this.recordHideAudit(experience, "experience_unhide", hostName);
+
+            return {
+                message: "Experience unhidden successfully",
+                isHidden: false,
+                experience
+            };
         }
 
         throw new BadRequestError("Invalid action. Must be 'hide', 'request_hide', 'unhide', or 'request_unhide'");

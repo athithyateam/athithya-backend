@@ -20,6 +20,7 @@ router.get("/experiences", adminHandler.getAllExperiences);
 router.get("/experiences/pending", adminHandler.getPendingExperiences);
 router.patch("/experiences/:id", adminHandler.updateExperience);
 router.patch("/experiences/:id/status", adminHandler.updateExperienceStatus);
+router.patch("/experiences/:id/hide", adminHandler.toggleHideExperience);
 router.delete("/experiences/:id", adminHandler.deleteExperience);
 
 // Bookings Management

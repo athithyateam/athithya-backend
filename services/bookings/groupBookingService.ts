@@ -85,6 +85,9 @@ export class GroupBookingService {
         if (!experience) {
             throw new NotFoundError("Experience not found");
         }
+        if (experience.isHidden) {
+            throw new BadRequestError("This experience is currently hidden and not available for booking");
+        }
 
         let targetIds: string[] = [];
         if (Array.isArray(input.friendIds) && input.friendIds.length > 0) {
@@ -232,6 +235,9 @@ export class GroupBookingService {
         const experience = await this.experienceModel.findById(expId);
         if (!experience) {
             throw new NotFoundError("Experience not found");
+        }
+        if (experience.isHidden) {
+            throw new BadRequestError("This experience is currently hidden and not available for booking");
         }
 
         const validUsers = await this.userModel.find({ _id: { $in: input.invitedUserIds }, role: { $ne: 'host' } });

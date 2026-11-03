@@ -87,27 +87,45 @@ Requests must supply a valid JWT with `role: "admin"`.
 
 ---
 
-### 3.3 Update Experience Status (Approve / Reject)
+### 3.3 Update Experience Status (Approve / Reject / Hide / Unhide)
 * **Method**: `PATCH`
 * **Path**: `/api/admin/experiences/:id/status`
 * **Request Body**:
   ```json
   {
-    "status": "active", // "active" | "rejected"
-    "adminComment": "Approved after document verification"
+    "status": "active", // "active" | "approved" | "inactive" | "rejected" | "hidden" | "unhidden"
+    "remarks": "Approved after document verification"
   }
   ```
+* **Behavior**:
+  * If a hide request is pending (`hideRequested: true`), passing `active`/`approved` approves the hide (sets `isHidden = true`, records audit log, and notifies host). Passing `inactive`/`rejected` rejects the request.
+  * If an unhide request is pending (`unhideRequested: true`), passing `active`/`approved` approves unhiding (sets `isHidden = false`, records audit log, and notifies host). Passing `inactive`/`rejected` rejects the request.
+  * Passing `status: "hidden"` or `"unhidden"` directly toggles visibility with audit logging.
 
 ---
 
-### 3.4 Update Experience
+### 3.4 Direct Experience Visibility Toggle
+* **Method**: `PATCH`
+* **Path**: `/api/admin/experiences/:id/hide`
+* **Request Body**:
+  ```json
+  {
+    "action": "hide", // "hide" | "unhide"
+    "reason": "Administrative suspension"
+  }
+  ```
+* **Success Response (200)**: Directly hides or unhides the experience with full audit logging and idempotency.
+
+---
+
+### 3.5 Update Experience
 * **Method**: `PATCH`
 * **Path**: `/api/admin/experiences/:id`
 * **Request Body**: Direct administrative edits to experience title, price, or description.
 
 ---
 
-### 3.5 Delete Experience
+### 3.6 Delete Experience
 * **Method**: `DELETE`
 * **Path**: `/api/admin/experiences/:id`
 * **Success Response (200)**: Permanently removes experience document and media.

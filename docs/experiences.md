@@ -158,18 +158,31 @@ Before creating or updating an experience, media assets (photos and videos) must
 
 ---
 
-### 2.5 Request to Hide Experience
+### 2.5 Request to Hide / Toggle Experience Visibility
 * **Method**: `PATCH`
 * **Path**: `/api/experiences/:id/request-hide`
-* **Auth**: Required (`checkAuth` — author only)
+* **Auth**: Required (`checkAuth` — author or admin)
+* **Request Body** (optional):
+  ```json
+  {
+    "action": "request_hide", // "request_hide" (default for hosts) | "hide" | "request_unhide" | "unhide" (admin only)
+    "reason": "Seasonal maintenance" // Optional reason string
+  }
+  ```
+* **Supported Actions & Idempotency**:
+  * `"request_hide"`: Submits a hide review request to admin. If already pending, returns existing state idempotently without duplicate admin emails.
+  * `"hide"`: Directly hides the experience from public listings immediately. If already hidden, returns idempotently without mutating `hiddenAt` or duplicating audit logs.
+  * `"request_unhide"`: Submits an unhide review request to admin. Requires experience to be currently hidden. Idempotent on repeated calls.
+  * `"unhide"`: Directly unhides the experience (admin only). Idempotent if already visible.
 * **Success Response (200)**:
   ```json
   {
     "success": true,
-    "message": "Experience visibility updated",
-    "isHidden": true
+    "message": "Hide request submitted for admin review",
+    "hideRequested": true
   }
   ```
+  *(or `isHidden: true` / `unhideRequested: true` depending on action)*
 
 ---
 
