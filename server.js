@@ -34,6 +34,26 @@ for (const envPath of candidateEnvPaths) {
 // Fallback to default dotenv lookup
 dotenv.config();
 
+// Sanitize GOOGLE_APPLICATION_CREDENTIALS if pointing to a non-existent file
+if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    const credPath = path.isAbsolute(process.env.GOOGLE_APPLICATION_CREDENTIALS)
+        ? process.env.GOOGLE_APPLICATION_CREDENTIALS
+        : path.resolve(process.cwd(), process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    if (!fs.existsSync(credPath)) {
+        console.warn(`[Config] GOOGLE_APPLICATION_CREDENTIALS points to non-existent file (${process.env.GOOGLE_APPLICATION_CREDENTIALS}). Unsetting to prevent GoogleAuth crashes.`);
+        delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    }
+}
+
+// Process-level safety nets to prevent unexpected crashes from external library background promises
+process.on("unhandledRejection", (reason) => {
+    console.error("⚠️ Unhandled Promise Rejection:", reason);
+});
+
+process.on("uncaughtException", (error) => {
+    console.error("🔥 Uncaught Exception:", error);
+});
+
 const PORT = Number(process.env.PORT) || 5000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const IS_PRODUCTION = NODE_ENV === "production";
