@@ -235,12 +235,7 @@ export class GoogleDriveService {
                 webContentLink: file.data.webContentLink
             };
         } catch (error: any) {
-            const errData = error?.response?.data;
-            if (errData?.error === "invalid_grant") {
-                console.error(`[GoogleDriveSync] Upload failed: GOOGLE_DRIVE_REFRESH_TOKEN in .env is expired or invalid (invalid_grant). Media saved to primary storage. Run 'node scripts/generateDriveToken.js' to generate a fresh token.`);
-            } else {
-                console.error(`[GoogleDriveSync] Upload failed:`, errData || error.message);
-            }
+            console.error(`[GoogleDriveSync] Upload failed:`, error?.response?.data || error.message);
             return null;
         }
     }
@@ -292,12 +287,7 @@ export class GoogleDriveService {
             await drive.files.delete({ fileId });
             return true;
         } catch (error: any) {
-            const errData = error?.response?.data;
-            if (errData?.error === "invalid_grant") {
-                console.error(`[GoogleDriveSync] Delete failed: GOOGLE_DRIVE_REFRESH_TOKEN in .env is expired or invalid (invalid_grant).`);
-            } else {
-                console.error(`[GoogleDriveSync] Delete failed for file ${fileId}:`, errData || error.message);
-            }
+            console.error(`[GoogleDriveSync] Delete failed for file ${fileId}:`, error?.response?.data || error.message);
             return false;
         }
     }
